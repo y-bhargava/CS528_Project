@@ -1,1 +1,95 @@
-# Our Repo for the 528 project
+# Touchless HCI Project (CS528)
+
+## What This App Is
+
+This project is a touchless Human-Computer Interface (HCI) system. A wearable device
+(ESP32 + IMU, and later ML/CV pipelines) detects motion/gestures and sends events to
+the host app, which maps them to semantic actions and executes macOS controls.
+
+## Goal
+
+The immediate goal is a modular end-to-end pipeline that lets teams work independently:
+
+- `esp/` team sends gesture events over the protocol.
+- `ml/` team improves gesture recognition and event quality.
+- `host/` team parses events, routes actions, and executes OS behavior safely.
+
+This repo is structured so each layer can evolve without blocking the others, as long as
+the shared event contract in `docs/protocol.md` stays aligned.
+
+## Repo Layout
+
+```text
+host/   Python host listener/router/executor
+esp/    ESP32 firmware (placeholder folder)
+ml/     ML pipeline/training (placeholder folder)
+docs/   Shared docs and protocol
+```
+
+## UV Setup
+
+From repo root:
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install pyautogui
+```
+
+If `uv` is not installed yet on macOS:
+
+```bash
+brew install uv
+```
+
+## Run Host
+
+Dry-run (default, no macOS side effects):
+
+```bash
+uv run python host/simulator.py | uv run python -u host/main.py
+```
+
+Live mode (real macOS actions):
+
+```bash
+uv run python host/main.py --input-file /tmp/hci_replay.ndjson --live
+```
+
+Curated live demo replay file (included in repo):
+
+```bash
+while IFS= read -r line; do
+  sleep 5
+  printf '%s\n' "$line"
+done < docs/replay_live_demo.ndjson | uv run python host/main.py --live
+```
+
+Live mode prints:
+
+- `[live] LIVE MODE ENABLED: real macOS actions may be executed`
+- `[live] starting in 3...`
+- `[live] starting in 2...`
+- `[live] starting in 1...`
+- `[live] live execution active`
+
+## Live Action Backends
+
+- `PREV_TAB` / `NEXT_TAB` / `NEW_TAB`: PyAutoGUI hotkeys
+- `PLAY_PAUSE`: AppleScript via `osascript` (System Events key code `100`)
+
+## Baseline Status
+
+- Live tab controls are validated (`PREV_TAB`, `NEXT_TAB`, `NEW_TAB`).
+- `PLAY_PAUSE` is wired and may fail if media control is unavailable or macOS automation permissions are not granted.
+- Live mode is intentionally gated behind `--live` with a startup warning + countdown.
+
+## Cooldown
+
+Live execution uses per-action cooldowns in:
+
+- `host/executor.py` (`LIVE_ACTION_COOLDOWNS`)
+
+Cooldown skips are concise:
+
+- `skip action=NEXT_TAB reason=cooldown remaining=0.18`
