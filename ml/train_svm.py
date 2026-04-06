@@ -27,16 +27,16 @@ def _load_csv(path: Path) -> list[list[float]] | None:
     rows: list[list[float]] = []
     with open(path, newline="", encoding="utf-8") as fh:
         reader = csv.reader(fh)
-        next(reader, None)  
+        next(reader, None)
         for row in reader:
             try:
                 rows.append([float(v) for v in row])
             except ValueError:
                 continue
-    return rows if len(rows) >= WINDOW_SIZE else None
+    return rows if rows else None
 
 
-def load_dataset() -> tuple[np.ndarray, np.ndarray]:
+def load_dataset() -> tuple[list[np.ndarray], np.ndarray]:
     X_list, y_list = [], []
 
     for label_idx, gesture in enumerate(GESTURE_CLASSES):
@@ -55,19 +55,16 @@ def load_dataset() -> tuple[np.ndarray, np.ndarray]:
             rows = _load_csv(path)
             if rows is None:
                 continue
-            X_list.append(rows[:WINDOW_SIZE])
+            X_list.append(np.array(rows, dtype=np.float32))
             y_list.append(label_idx)
             loaded += 1
 
-        print(f"[data] {gesture:>12}: {loaded} samples")
+        print(f"[data] {gesture:>12}: {loaded} files")
 
     if not X_list:
-        return np.empty((0, WINDOW_SIZE, N_AXES), dtype=np.float32), np.empty(0, dtype=np.int32)
+        return [], np.empty(0, dtype=np.int32)
 
-    return (
-        np.array(X_list, dtype=np.float32),
-        np.array(y_list, dtype=np.int32),
-    )
+    return X_list, np.array(y_list, dtype=np.int32)
 
 
 
@@ -80,8 +77,8 @@ def extract_features(window: np.ndarray) -> np.ndarray:
     return np.concatenate([mean, std, maximum, minimum, rms])  
 
 
-def extract_all_features(X: np.ndarray) -> np.ndarray:
-    return np.stack([extract_features(X[i]) for i in range(len(X))])
+def extract_all_features(X: list[np.ndarray]) -> np.ndarray:
+    return np.stack([extract_features(window) for window in X])
 
 
 def train(c: float, kernel: str) -> None:
