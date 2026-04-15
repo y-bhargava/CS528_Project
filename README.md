@@ -34,6 +34,7 @@ From repo root:
 uv venv .venv
 source .venv/bin/activate
 uv pip install pyautogui
+uv pip install opencv-python mediapipe
 ```
 
 If `uv` is not installed yet on macOS:
@@ -93,3 +94,24 @@ Live execution uses per-action cooldowns in:
 Cooldown skips are concise:
 
 - `skip action=NEXT_TAB reason=cooldown remaining=0.18`
+
+## CV Cursor (MediaPipe)
+
+Run webcam-based cursor control (host-side):
+
+```bash
+uv run python host/cv_cursor.py
+```
+
+Safe dry-run (no real cursor movement/clicks):
+
+```bash
+uv run python host/cv_cursor.py --dry-run
+```
+
+Controls:
+
+- Move index fingertip to move cursor
+- Quick pinch (thumb + index) to click
+- Pinch and hold to drag
+- Press `q` to quit
