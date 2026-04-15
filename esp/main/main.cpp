@@ -16,8 +16,8 @@ extern "C" {
     #include "esp_log.h"
 }
 
-#define I2C_MASTER_SCL_IO    1
-#define I2C_MASTER_SDA_IO    0
+#define I2C_MASTER_SCL_IO    GPIO_NUM_9
+#define I2C_MASTER_SDA_IO    GPIO_NUM_8
 #define I2C_MASTER_FREQ_HZ   400000
 #define I2C_MASTER_NUM       I2C_NUM_0
 
@@ -134,17 +134,17 @@ void gesture_task(void *pvParameters) {
             int prediction = classify_gesture();
 
             if (prediction == 0) {
-                printf("  [RESULT] --> UP    | CMD:UP\n");
-                printf("CMD:UP\n");
+                printf("  [RESULT] --> UP\n");
+                printf("{\"type\":\"gesture\",\"name\":\"up\",\"source\":\"esp\"}\n");
             } else if (prediction == 1) {
-                printf("  [RESULT] --> DOWN  | CMD:DOWN\n");
-                printf("CMD:DOWN\n");
+                printf("  [RESULT] --> DOWN\n");
+                printf("{\"type\":\"gesture\",\"name\":\"down\",\"source\":\"esp\"}\n");
             } else if (prediction == 2) {
-                printf("  [RESULT] --> LEFT  | CMD:LEFT\n");
-                printf("CMD:LEFT\n");
+                printf("  [RESULT] --> LEFT\n");
+                printf("{\"type\":\"gesture\",\"name\":\"left\",\"source\":\"esp\"}\n");
             } else if (prediction == 3) {
-                printf("  [RESULT] --> RIGHT | CMD:RIGHT\n");
-                printf("CMD:RIGHT\n");
+                printf("  [RESULT] --> RIGHT\n");
+                printf("{\"type\":\"gesture\",\"name\":\"right\",\"source\":\"esp\"}\n");
             }
 
             // Cooldown to prevent double-firing

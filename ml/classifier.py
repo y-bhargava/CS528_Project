@@ -17,10 +17,10 @@ STRIDE = 25
 CONFIDENCE_THRESHOLD = 0.75
 
 GESTURE_COOLDOWN: dict[str, float] = {
-    "swipe_left": 0.6,
-    "swipe_right": 0.6,
-    "flick_up": 0.6,
-    "hold": 1.2,
+    "left": 0.6,
+    "right": 0.6,
+    "up": 0.6,
+    "down": 0.6,
 }
 
 
