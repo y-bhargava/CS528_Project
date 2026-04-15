@@ -112,6 +112,27 @@ uv run python host/cv_cursor.py --dry-run
 Controls:
 
 - Move index fingertip to move cursor
-- Quick pinch (thumb + index) to click
-- Pinch and hold to drag
+- Quick pinch (thumb + middle) to click
+- Pinch and hold (thumb + middle) to drag
 - Press `q` to quit
+
+## Unified Host Runner Modes
+
+The host supports 3 modes in one entrypoint:
+
+- `--mode esp`: ESP/NDJSON listener only (default)
+- `--mode cv`: CV cursor controller only
+- `--mode hybrid`: ESP + CV together (threaded single-process)
+
+Examples:
+
+```bash
+# ESP only
+uv run python host/main.py --mode esp --serial-port /dev/cu.usbserial-10 --serial-baud 115200 --live
+
+# CV only (dry-run by default; add --live for real cursor actions)
+uv run python host/main.py --mode cv --camera-index 1 --live
+
+# Hybrid (ESP + CV together)
+uv run python host/main.py --mode hybrid --serial-port /dev/cu.usbserial-10 --camera-index 1 --live
+```
