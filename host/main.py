@@ -25,7 +25,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--serial-port",
-        help="Read NDJSON messages from a serial port (not implemented yet).",
+        help="Read NDJSON messages from a serial port.",
     )
     parser.add_argument(
         "--serial-baud",
@@ -79,34 +79,38 @@ def main() -> int:
     if args.live:
         _announce_live_mode()
 
-    for line_number, raw_line in enumerate(lines, start=1):
-        message = parse_ndjson_line(raw_line, line_number)
-        if message is None:
-            continue
+    try:
+        for line_number, raw_line in enumerate(lines, start=1):
+            message = parse_ndjson_line(raw_line, line_number)
+            if message is None:
+                continue
 
-        message_type = message.get("type", "<missing>")
-        if message_type == "gesture":
-            name = message.get("name")
-            if isinstance(name, str) and name.strip():
-                gesture_name = name.strip()
-                action = route_gesture(gesture_name)
-                if action is not None:
-                    print(f"type=gesture name={gesture_name} action={action}")
-                    execute_action(action, dry_run=dry_run)
+            message_type = message.get("type", "<missing>")
+            if message_type == "gesture":
+                name = message.get("name")
+                if isinstance(name, str) and name.strip():
+                    gesture_name = name.strip()
+                    action = route_gesture(gesture_name)
+                    if action is not None:
+                        print(f"type=gesture name={gesture_name} action={action}")
+                        execute_action(action, dry_run=dry_run)
+                    else:
+                        print(f"type=gesture name={gesture_name} action=<unmapped>")
+                        print(
+                            f"[warning] line={line_number} unknown gesture name={gesture_name}",
+                            file=sys.stderr,
+                        )
                 else:
-                    print(f"type=gesture name={gesture_name} action=<unmapped>")
+                    print("type=gesture name=<missing>")
                     print(
-                        f"[warning] line={line_number} unknown gesture name={gesture_name}",
+                        f"[warning] line={line_number} gesture message missing name",
                         file=sys.stderr,
                     )
             else:
-                print("type=gesture name=<missing>")
-                print(
-                    f"[warning] line={line_number} gesture message missing name",
-                    file=sys.stderr,
-                )
-        else:
-            print(f"type={message_type}")
+                print(f"type={message_type}")
+    except (RuntimeError, NotImplementedError) as exc:
+        print(f"[error] {exc}", file=sys.stderr)
+        return 2
 
     return 0
 
@@ -122,4 +126,6 @@ if __name__ == "__main__":
             sys.stdout.close()
         except OSError:
             pass
+        raise SystemExit(0)
+    except KeyboardInterrupt:
         raise SystemExit(0)

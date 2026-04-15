@@ -11,7 +11,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-GESTURE_CLASSES = ["swipe_left", "swipe_right", "flick_up", "hold"]
+GESTURE_CLASSES = ["left", "right", "up", "down"]
 AXES = ["ax", "ay", "az", "gx", "gy", "gz"]
 WINDOW_SIZE = 50
 N_AXES = len(AXES)

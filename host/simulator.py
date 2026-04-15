@@ -6,7 +6,7 @@ import random
 import signal
 import time
 
-GESTURES = ["swipe_left", "swipe_right", "flick_up", "hold"]
+GESTURES = ["up", "down", "left", "right"]
 DELAY_SECONDS = 0.5
 
 
