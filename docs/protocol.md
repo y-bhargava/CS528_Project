@@ -17,8 +17,8 @@ The system is designed to be:
 - Messages are sent as newline-delimited JSON (NDJSON)
 
 Example stream:
-{"type":"gesture","name":"swipe_left","confidence":0.91}
-{"type":"gesture","name":"swipe_right","confidence":0.88}
+{"type":"gesture","name":"left","confidence":0.91}
+{"type":"gesture","name":"right","confidence":0.88}
 
 NOTE: Transport is fixed to serial for this protocol version.
 
@@ -34,7 +34,7 @@ Represents a recognized gesture (rule-based or ML).
 Example:
 {
   "type": "gesture",
-  "name": "swipe_left",
+  "name": "left",
   "confidence": 0.91,
   "timestamp": 1712345678
 }
@@ -186,17 +186,17 @@ We start with a small, high-separation gesture set.
 
 ## Supported Gestures
 
-- swipe_left
+- left
   Strong leftward motion
 
-- swipe_right
+- right
   Strong rightward motion
 
-- flick_up
-  Quick upward motion
+- up
+  Quick upward flick motion
 
-- hold
-  Hand remains relatively still for a short duration
+- down
+  Strong downward motion
 
 ---
 
@@ -216,26 +216,26 @@ Gestures are mapped to abstract actions (not OS-specific).
 # Example Mappings
 
 ## Browser / Productivity Demo
-- swipe_left → PREV_TAB
-- swipe_right → NEXT_TAB
-- flick_up → NEW_TAB
-- hold → PLAY_PAUSE or open project page
+- left → PREV_TAB
+- right → NEXT_TAB
+- up → NEW_TAB
+- down → PLAY_PAUSE or open project page
 
 ---
 
 ## Media Control Demo
-- swipe_left → PREV_TRACK
-- swipe_right → NEXT_TRACK
-- flick_up → VOLUME_UP
-- hold → PLAY_PAUSE
+- left → PREV_TRACK
+- right → NEXT_TRACK
+- up → VOLUME_UP
+- down → PLAY_PAUSE
 
 ---
 
 ## Presentation Demo
-- swipe_left → PREV_SLIDE
-- swipe_right → NEXT_SLIDE
-- flick_up → START_PRESENTATION
-- hold → PAUSE / BLACK SCREEN
+- left → PREV_SLIDE
+- right → NEXT_SLIDE
+- up → START_PRESENTATION
+- down → PAUSE / BLACK SCREEN
 
 ---
 

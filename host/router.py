@@ -4,6 +4,11 @@
 from typing import Optional
 
 GESTURE_TO_ACTION = {
+    "left": "PREV_TAB",
+    "right": "NEXT_TAB",
+    "up": "NEW_TAB",
+    "down": "PLAY_PAUSE",
+    # Backward-compat aliases while teams migrate labels.
     "swipe_left": "PREV_TAB",
     "swipe_right": "NEXT_TAB",
     "flick_up": "NEW_TAB",
