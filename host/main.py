@@ -100,18 +100,30 @@ def _announce_live_mode() -> None:
     print("[live] live execution active", flush=True)
 
 
+import executor
+from executor import execute_action
+from router import route_gesture
+
+# host/main.py
+
 def _handle_gesture(gesture_name: str, dry_run: bool, line_number: int) -> None:
     action = route_gesture(gesture_name)
+    
+    # Check the LIVE state from the executor module
+    if executor.IS_PAUSED and action != "TOGGLE_PAUSE":
+        return
+
     if action is not None:
         print(f"type=gesture name={gesture_name} action={action}", flush=True)
         execute_action(action, dry_run=dry_run)
     else:
-        print(f"type=gesture name={gesture_name} action=<unmapped>", flush=True)
-        print(
-            f"[warning] line={line_number} unknown gesture name={gesture_name}",
-            file=sys.stderr,
-            flush=True,
-        )
+        if not executor.IS_PAUSED:
+            print(f"type=gesture name={gesture_name} action=<unmapped>", flush=True)
+            print(
+                f"[warning] line={line_number} unknown gesture name={gesture_name}",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 def _run_esp_pipeline(args: argparse.Namespace, dry_run: bool, stop_event: threading.Event | None = None) -> int:
