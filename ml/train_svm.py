@@ -1,10 +1,10 @@
 import argparse
-import csv
 import pickle
 import sys
 from pathlib import Path
 
 import numpy as np
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -25,6 +25,7 @@ MODEL_PATH = Path(__file__).parent / "model_svm.pkl"
 DEFAULT_C      = 1.0
 DEFAULT_KERNEL = "linear"
 DEFAULT_GAMMA  = "0.001"
+DEFAULT_MODEL_TYPE = "lda"
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -67,7 +68,7 @@ def load_dataset() -> tuple[list[np.ndarray], np.ndarray]:
 
     return X_list, np.array(y_list, dtype=np.int32)
 
-def train(c: float, kernel: str, gamma: str | float) -> None:
+def train(model_type: str, c: float, kernel: str, gamma: str | float) -> None:
     X_raw, y = load_dataset()
 
     if len(X_raw) == 0:
@@ -84,15 +85,20 @@ def train(c: float, kernel: str, gamma: str | float) -> None:
 
     X = extract_all_features(X_raw)   # shape (N, 18)
 
+    if model_type == "lda":
+        clf = LinearDiscriminantAnalysis(solver="svd")
+    else:
+        clf = SVC(C=c, kernel=kernel, gamma=gamma, probability=True, random_state=42)
+
     pipeline = Pipeline([
         ("scaler", StandardScaler()),
-        ("svm",    SVC(C=c, kernel=kernel, gamma=gamma, probability=True, random_state=42)),
+        ("clf", clf),
     ])
 
     cv     = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     scores = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy")
     print(
-        f"[train] 5-fold CV accuracy: {scores.mean():.4f} ± {scores.std():.4f}  "
+        f"[train] {model_type.upper()} 5-fold CV accuracy: {scores.mean():.4f} ± {scores.std():.4f}  "
         f"(per fold: {', '.join(f'{s:.3f}' for s in scores)})"
     )
 
@@ -106,6 +112,7 @@ def train(c: float, kernel: str, gamma: str | float) -> None:
                 "axes": AXIS_COLS,
                 "feature_order": "max,min,std",
                 "window_size": 100,
+                "model_type": model_type,
             },
             fh,
         )
@@ -116,25 +123,29 @@ def train(c: float, kernel: str, gamma: str | float) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Train SVM gesture classifier (18 features).")
+    parser = argparse.ArgumentParser(description="Train gesture classifier (18 features).")
+    parser.add_argument(
+        "--model-type", default=DEFAULT_MODEL_TYPE, choices=["lda", "svm"],
+        help=f"Classifier type (default: {DEFAULT_MODEL_TYPE}).",
+    )
     parser.add_argument(
         "--c", type=float, default=DEFAULT_C,
-        help=f"SVM regularisation parameter C (default: {DEFAULT_C}).",
+        help=f"SVM regularisation parameter C (default: {DEFAULT_C}, SVM only).",
     )
     parser.add_argument(
         "--kernel", default=DEFAULT_KERNEL, choices=["rbf", "linear", "poly"],
-        help=f"SVM kernel (default: {DEFAULT_KERNEL}).",
+        help=f"SVM kernel (default: {DEFAULT_KERNEL}, SVM only).",
     )
     parser.add_argument(
         "--gamma", default=DEFAULT_GAMMA,
-        help=f"SVM gamma for rbf/poly kernels (default: {DEFAULT_GAMMA}).",
+        help=f"SVM gamma for rbf/poly kernels (default: {DEFAULT_GAMMA}, SVM only).",
     )
     args = parser.parse_args()
     try:
         gamma: str | float = float(args.gamma)
     except ValueError:
         gamma = args.gamma
-    train(args.c, args.kernel, gamma)
+    train(args.model_type, args.c, args.kernel, gamma)
     return 0
 
 

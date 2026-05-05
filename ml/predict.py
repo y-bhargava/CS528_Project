@@ -1,5 +1,5 @@
 """
-predict.py — test the trained SVM gesture model
+predict.py — test the trained gesture model
 
 OFFLINE  (test against a saved CSV file):
     python predict.py path/to/gesture.csv
@@ -181,7 +181,7 @@ def test_live(port: str, baud: int, pipeline, gesture_classes, threshold: float 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Test the trained SVM gesture model.",
+        description="Test the trained gesture model.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

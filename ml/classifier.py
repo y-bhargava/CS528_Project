@@ -13,7 +13,7 @@ try:
 except ImportError:
     from .features import AXIS_COLS, WINDOW_SIZE, extract_features
 
-SVM_MODEL_PATH = Path(__file__).parent / "model_svm.pkl"
+MODEL_PATH = Path(__file__).parent / "model_svm.pkl"
 
 STRIDE = 25
 
@@ -48,25 +48,26 @@ def _emit_gesture(name: str, confidence: float) -> None:
         "type": "gesture",
         "name": name,
         "confidence": round(confidence, 3),
-        "source": "svm",
+        "source": "ml",
     }
     print(json.dumps(msg, separators=(",", ":")), flush=True)
 
 
 def main() -> int:
-    if not SVM_MODEL_PATH.exists():
+    if not MODEL_PATH.exists():
         print(
-            f"[classifier] model not found: {SVM_MODEL_PATH}\n"
+            f"[classifier] model not found: {MODEL_PATH}\n"
             f"[classifier] Run 'python ml/train_svm.py' first.",
             file=sys.stderr,
         )
         return 1
 
-    print("[classifier] Loading SVM model...", file=sys.stderr, flush=True)
-    with open(SVM_MODEL_PATH, "rb") as fh:
+    print("[classifier] Loading gesture model...", file=sys.stderr, flush=True)
+    with open(MODEL_PATH, "rb") as fh:
         bundle = pickle.load(fh)
     pipeline = bundle["pipeline"]
     gesture_classes = bundle["gesture_classes"]
+    model_type = bundle.get("model_type", "unknown")
     axes = bundle.get("axes", AXIS_COLS)
     if axes != AXIS_COLS:
         print(
@@ -76,7 +77,7 @@ def main() -> int:
         return 1
 
     print(
-        f"[classifier] Ready. Classes: {gesture_classes}. "
+        f"[classifier] Ready ({model_type}). Classes: {gesture_classes}. "
         f"Window={WINDOW_SIZE} Stride={STRIDE} Threshold={CONFIDENCE_THRESHOLD}",
         file=sys.stderr,
         flush=True,
