@@ -4,7 +4,7 @@
 
 This project is a touchless Human-Computer Interface (HCI) system. A wearable device
 (ESP32 + IMU, and later ML/CV pipelines) detects motion/gestures and sends events to
-the host app, which maps them to semantic actions and executes macOS controls.
+the host app, which maps them to semantic actions and executes OS controls.
 
 ## Goal
 
@@ -24,7 +24,20 @@ host/   Python host listener/router/executor
 esp/    ESP32 firmware (placeholder folder)
 ml/     ML pipeline/training (placeholder folder)
 docs/   Shared docs and protocol
+launcher/  Electron desktop launcher (config + permissions + run controls)
 ```
+
+## Desktop Launcher (Electron)
+
+A minimal desktop launcher is available in `launcher/` with:
+
+- mode presets (`esp`, `cv`, `hybrid`)
+- live/dry-run toggle
+- platform backend selection (`auto`, `mac`, `windows`)
+- serial/replay and CV tuning controls
+- permission status panel + settings deep links
+- start/stop process controls and live host logs
+- saved local config between launches
 
 ## UV Setup
 
@@ -43,15 +56,25 @@ If `uv` is not installed yet on macOS:
 brew install uv
 ```
 
+## Launcher Setup
+
+The Electron launcher lives in `launcher/` and controls host startup/config from a GUI.
+
+```bash
+cd launcher
+npm install
+npm start
+```
+
 ## Run Host
 
-Dry-run (default, no macOS side effects):
+Dry-run (default, no OS side effects):
 
 ```bash
 uv run python host/simulator.py | uv run python -u host/main.py
 ```
 
-Live mode (real macOS actions):
+Live mode (real OS actions):
 
 ```bash
 uv run python host/main.py --input-file /tmp/hci_replay.ndjson --live
@@ -68,7 +91,7 @@ done < docs/replay_live_demo.ndjson | uv run python host/main.py --live
 
 Live mode prints:
 
-- `[live] LIVE MODE ENABLED: real macOS actions may be executed`
+- `[live] LIVE MODE ENABLED: real OS actions may be executed`
 - `[live] starting in 3...`
 - `[live] starting in 2...`
 - `[live] starting in 1...`
@@ -82,7 +105,7 @@ Live mode prints:
 ## Baseline Status
 
 - Live tab controls are validated (`PREV_TAB`, `NEXT_TAB`, `NEW_TAB`).
-- `PLAY_PAUSE` is wired and may fail if media control is unavailable or macOS automation permissions are not granted.
+- `PLAY_PAUSE` is wired and may fail if media control is unavailable or automation permissions are not granted.
 - Live mode is intentionally gated behind `--live` with a startup warning + countdown.
 
 ## Cooldown
@@ -115,7 +138,7 @@ Controls:
 - Quick pinch (thumb + middle) to click
 - Mapped app + context mode: pinch + vertical move to scroll
 - Unmapped app or global clutch mode: pinch and hold to drag
-- Hold pinky-up pose (other fingers down) briefly to toggle routing mode (`CONTEXT`/`GLOBAL`)
+- Hold pinky-up pose (other fingers down) briefly to clutch into `GLOBAL`; release to return to `CONTEXT`
 - Press `q` to quit
 
 ## Unified Host Runner Modes
@@ -135,7 +158,7 @@ Context-aware ESP routing profiles:
 
 Touchless global switch:
 
-- CV pinky-up hold toggles routing mode between `CONTEXT` and `GLOBAL`
+- CV pinky-up hold acts as a clutch: hold for `GLOBAL`, release for `CONTEXT`
 - In `GLOBAL` mode, ESP gestures always use desktop mappings for app/window switching
 
 Examples:
@@ -231,7 +254,9 @@ python3 -u host/main.py --mode esp --serial-port /dev/cu.usbserial-10 --serial-b
 Common flags for `host/main.py`:
 
 - `--mode esp|cv|hybrid`: selects ESP-only, CV-only, or both together.
+- `--platform auto|mac|windows`: selects platform backend (`auto` detects from OS).
 - `--live`: enables real OS actions. Omit for dry-run logging only.
+- `--dry-run`: explicitly forces dry-run mode (useful when scripting launch flags).
 - `--camera-index N`: selects webcam index (your known-good value is often `1`).
 - `--serial-port PATH`: serial device for ESP input (example: `/dev/cu.usbserial-10`).
 - `--serial-baud N`: serial baud rate (default `115200`).

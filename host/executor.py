@@ -6,6 +6,9 @@ import subprocess
 import sys
 import time
 
+from app_context import get_frontmost_app_name
+from platform_util import is_windows
+
 IS_PAUSED = False
 
 LIVE_ACTION_COOLDOWNS: dict[str, float] = {
@@ -51,53 +54,63 @@ def _get_pyautogui():
     _PYAUTOGUI = pyautogui
     return _PYAUTOGUI
 
+
 def _run_toggle_pause() -> None:
-    global IS_PAUSED    # This line is critical!
+    global IS_PAUSED
     IS_PAUSED = not IS_PAUSED
     state = "PAUSED" if IS_PAUSED else "RESUMED"
     print(f"\n[info] System is now {state}\n", flush=True)
 
+
 def _run_prev_tab() -> None:
     pyautogui = _get_pyautogui()
-    # --- Mac Hotkeys ---
-    # Mac standard for previous tab is: command + shift + [
-    # (Alternatively: command + option + left)
-    # Uncomment the line below to use the Mac specific binding:
-    # pyautogui.hotkey("command", "shift", "[")
-    pyautogui.hotkey("ctrl", "shift", "tab")
+    if is_windows():
+        pyautogui.hotkey("ctrl", "shift", "tab")
+        return
+    # Common macOS mapping for previous tab.
+    pyautogui.hotkey("command", "shift", "[")
+
+
+def _run_new_tab() -> None:
+    pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("ctrl", "t")
+        return
+    pyautogui.hotkey("command", "t")
 
 
 def _run_next_tab() -> None:
     pyautogui = _get_pyautogui()
-    # --- Mac Hotkeys ---
-    # Mac standard for next tab is: command + shift + ]
-    # (Alternatively: command + option + right)
-    # Uncomment the line below to use the Mac specific binding:
-    # pyautogui.hotkey("command", "shift", "]")
-    pyautogui.hotkey("ctrl", "tab")
+    if is_windows():
+        pyautogui.hotkey("ctrl", "tab")
+        return
+    # Common macOS mapping for next tab.
+    pyautogui.hotkey("command", "shift", "]")
 
 
 def _run_page_up() -> None:
     pyautogui = _get_pyautogui()
-    # --- Mac Hotkeys ---
-    # pyautogui.press("pageup") translates natively to Mac OS.
-    # On a physical Mac keyboard, this is equivalent to pressing: fn + up
     pyautogui.press("pageup")
+
 
 def _run_page_down() -> None:
     pyautogui = _get_pyautogui()
-    # --- Mac Hotkeys ---
-    # pyautogui.press("pagedown") translates natively to Mac OS.
-    # On a physical Mac keyboard, this is equivalent to pressing: fn + down
     pyautogui.press("pagedown")
 
 
 def _run_close_tab() -> None:
     pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("ctrl", "w")
+        return
     pyautogui.hotkey("command", "w")
 
 
 def _run_play_pause() -> None:
+    if is_windows():
+        pyautogui = _get_pyautogui()
+        pyautogui.press("playpause")
+        return
     result = subprocess.run(
         [
             "osascript",
@@ -123,25 +136,16 @@ def _run_next_slide() -> None:
 
 
 def _get_frontmost_app_name() -> str | None:
-    script = (
-        'tell application "System Events" to '
-        "name of first application process whose frontmost is true"
-    )
-    result = subprocess.run(
-        ["osascript", "-e", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    name = result.stdout.strip()
-    return name or None
+    return get_frontmost_app_name()
 
 
 def _run_start_presentation() -> None:
     pyautogui = _get_pyautogui()
     app_name = _get_frontmost_app_name()
+    if is_windows():
+        # PowerPoint on Windows: start slideshow from beginning.
+        pyautogui.press("f5")
+        return
     if app_name == "Keynote":
         pyautogui.hotkey("command", "option", "p")
         return
@@ -158,6 +162,10 @@ def _run_exit_presentation() -> None:
 
 
 def _run_spotify_next_track() -> None:
+    if is_windows():
+        pyautogui = _get_pyautogui()
+        pyautogui.press("nexttrack")
+        return
     result = subprocess.run(
         ["osascript", "-e", 'tell application "Spotify" to next track'],
         check=False,
@@ -169,6 +177,10 @@ def _run_spotify_next_track() -> None:
 
 
 def _run_spotify_prev_track() -> None:
+    if is_windows():
+        pyautogui = _get_pyautogui()
+        pyautogui.press("prevtrack")
+        return
     result = subprocess.run(
         ["osascript", "-e", 'tell application "Spotify" to previous track'],
         check=False,
@@ -180,6 +192,11 @@ def _run_spotify_prev_track() -> None:
 
 
 def _run_volume_up() -> None:
+    if is_windows():
+        pyautogui = _get_pyautogui()
+        pyautogui.press("volumeup")
+        pyautogui.press("volumeup")
+        return
     result = subprocess.run(
         [
             "osascript",
@@ -201,6 +218,11 @@ def _run_volume_up() -> None:
 
 
 def _run_volume_down() -> None:
+    if is_windows():
+        pyautogui = _get_pyautogui()
+        pyautogui.press("volumedown")
+        pyautogui.press("volumedown")
+        return
     result = subprocess.run(
         [
             "osascript",
@@ -223,21 +245,33 @@ def _run_volume_down() -> None:
 
 def _run_switch_space_left() -> None:
     pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("win", "ctrl", "left")
+        return
     pyautogui.hotkey("ctrl", "left")
 
 
 def _run_switch_space_right() -> None:
     pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("win", "ctrl", "right")
+        return
     pyautogui.hotkey("ctrl", "right")
 
 
 def _run_mission_control() -> None:
     pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("win", "tab")
+        return
     pyautogui.hotkey("ctrl", "up")
 
 
 def _run_show_desktop() -> None:
     pyautogui = _get_pyautogui()
+    if is_windows():
+        pyautogui.hotkey("win", "d")
+        return
     pyautogui.hotkey("command", "f3")
 
 

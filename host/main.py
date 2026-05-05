@@ -18,6 +18,7 @@ from input_sources import (
     iter_ndjson_stdin,
 )
 from message_parser import parse_ndjson_line
+from platform_util import configure_platform
 from router import route_gesture_for_context
 
 
@@ -44,9 +45,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Baud rate for serial input (default: 115200).",
     )
     parser.add_argument(
+        "--platform",
+        choices=("auto", "mac", "windows"),
+        default="auto",
+        help="Platform backend selection (default: auto).",
+    )
+    live_group = parser.add_mutually_exclusive_group()
+    live_group.add_argument(
         "--live",
         action="store_true",
-        help="Run in live mode. Default is dry-run.",
+        help="Run in live mode.",
+    )
+    live_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Force dry-run mode (default behavior when --live is not used).",
     )
     parser.add_argument(
         "--camera-index",
@@ -84,6 +97,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Disable CV landmark overlay drawing for better performance.",
     )
     parser.add_argument(
+        "--headless-cv",
+        action="store_true",
+        help="Run CV without opening the OpenCV preview window.",
+    )
+    parser.add_argument(
         "--enable-dictation-hold",
         action="store_true",
         help="Enable thumbs-up hold to press-and-hold Fn for dictation apps.",
@@ -115,7 +133,7 @@ def _select_input_lines(args: argparse.Namespace) -> Iterable[str]:
 
 def _announce_live_mode() -> None:
     print(
-        "[live] LIVE MODE ENABLED: real macOS actions may be executed",
+        "[live] LIVE MODE ENABLED: real OS actions may be executed",
         flush=True,
     )
     for seconds in range(3, 0, -1):
@@ -258,7 +276,7 @@ def _build_cv_config(args: argparse.Namespace, dry_run: bool, mode_state: ModeSt
         drag_hold_ms=args.drag_hold_ms,
         click_move_threshold=args.click_move_threshold,
         dry_run=dry_run,
-        show_window=True,
+        show_window=not args.headless_cv,
         window_title="HCI Cursor (q to quit)",
         draw_landmarks=not args.hide_landmarks,
         mode_state=mode_state,
@@ -270,7 +288,10 @@ def _build_cv_config(args: argparse.Namespace, dry_run: bool, mode_state: ModeSt
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
+    configure_platform(args.platform)
     dry_run = not args.live
+    if args.dry_run:
+        dry_run = True
     mode_state = ModeState()
 
     if args.live:

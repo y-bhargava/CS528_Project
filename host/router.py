@@ -15,7 +15,6 @@ GESTURE_TO_ACTION = {
     "swipe_right": "NEXT_TAB",
     "flick_up": "PAGE_UP",
     "flick_down": "PAGE_DOWN",
-    "twist": "TOGGLE_PAUSE"
 }
 
 
@@ -27,9 +26,14 @@ def route_gesture(name: str) -> Optional[str]:
 APP_ALIASES: dict[str, str] = {
     "Google Chrome": "chrome",
     "Brave Browser": "chrome",
+    "chrome.exe": "chrome",
+    "brave.exe": "chrome",
     "Keynote": "presentation",
     "Microsoft PowerPoint": "presentation",
+    "POWERPNT.EXE": "presentation",
+    "powerpnt.exe": "presentation",
     "Spotify": "spotify",
+    "spotify.exe": "spotify",
 }
 
 PROFILE_MAPPINGS: dict[str, dict[str, str]] = {
@@ -74,7 +78,10 @@ def resolve_profile(active_app_name: str | None, mode: str) -> str:
 
     if active_app_name is None:
         return "desktop"
-    return APP_ALIASES.get(active_app_name, "desktop")
+    return APP_ALIASES.get(
+        active_app_name,
+        APP_ALIASES.get(active_app_name.lower(), "desktop"),
+    )
 
 
 def route_gesture_for_context(

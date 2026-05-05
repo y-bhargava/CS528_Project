@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MediaPipe-based hand cursor control for macOS."""
+"""MediaPipe-based hand cursor control."""
 
 import argparse
 import math
@@ -15,6 +15,7 @@ import cv2  # type: ignore
 import mediapipe as mp  # type: ignore
 import pyautogui
 from app_monitor import FrontmostAppMonitor
+from platform_util import is_mac
 from router import APP_ALIASES
 
 warnings.filterwarnings(
@@ -232,6 +233,8 @@ def run_cv_cursor(
     dictation_pose_started_at: float | None = None
     dictation_key_held = False
     dictation_hold_seconds = max(0.2, config.dictation_hold_ms / 1000.0)
+    dictation_supported = is_mac()
+    dictation_warned_unsupported = False
     app_monitor = FrontmostAppMonitor(
         poll_interval_seconds=config.app_poll_interval_seconds,
     )
@@ -287,7 +290,12 @@ def run_cv_cursor(
                         current_mode = str(config.mode_state.get_mode())
                     except Exception:
                         current_mode = "context"
-                app_is_mapped = active_app_name in APP_ALIASES
+                app_is_mapped = False
+                if active_app_name:
+                    app_is_mapped = (
+                        active_app_name in APP_ALIASES
+                        or active_app_name.lower() in APP_ALIASES
+                    )
                 cv_drag_mode = current_mode == "global" or not app_is_mapped
                 is_toggle_pose = _is_pinky_toggle_pose(hand, mp_hands)
                 is_dictation_pose = _is_thumbs_up_pose(hand, mp_hands)
@@ -316,7 +324,18 @@ def run_cv_cursor(
                         except Exception:
                             pass
 
-                if config.enable_dictation_hold and is_dictation_pose:
+                if config.enable_dictation_hold and not dictation_supported:
+                    if not dictation_warned_unsupported:
+                        print(
+                            "[cv-warning] dictation hold is only supported on macOS",
+                            flush=True,
+                        )
+                        dictation_warned_unsupported = True
+                elif (
+                    config.enable_dictation_hold
+                    and dictation_supported
+                    and is_dictation_pose
+                ):
                     if dictation_pose_started_at is None:
                         dictation_pose_started_at = now
                     if (

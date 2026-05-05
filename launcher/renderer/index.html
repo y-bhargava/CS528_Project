@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Touchless Launcher</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="window-shell">
+        <header class="topbar">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">⌘</span>
+            <h1>Touchless Launcher</h1>
+          </div>
+          <span id="run-status" class="pill">Idle</span>
+          <div class="top-actions">
+            <button id="btn-start" class="btn btn-primary" type="button">Start</button>
+            <button id="btn-stop" class="btn btn-ghost" type="button">Stop</button>
+            <button id="btn-open-settings" class="btn btn-icon" type="button" aria-label="Open settings">⚙</button>
+          </div>
+        </header>
+
+        <div class="workspace">
+          <section class="control-area">
+            <article class="main-card">
+              <div class="hero-emblem" aria-hidden="true">☝</div>
+              <h2>Touchless Control</h2>
+              <p class="hero-copy">Control your cursor and actions using hand gestures.</p>
+              <p class="hero-copy hero-copy-secondary">Private. Local. On your terms.</p>
+
+              <form id="config-form" class="main-form">
+                <label>
+                  Mode
+                  <select id="mode">
+                    <option value="esp">ESP Gesture Band</option>
+                    <option value="cv">CV (Computer Vision)</option>
+                    <option value="hybrid">Hybrid</option>
+                  </select>
+                </label>
+
+                <label class="toggle-row">
+                  <span>
+                    <strong>Live Actions</strong>
+                    <small>Execute real OS actions. Disable for safe testing.</small>
+                  </span>
+                  <input id="live" type="checkbox" />
+                </label>
+              </form>
+            </article>
+
+            <footer class="bottom-strip">
+              <span class="local-note">All processing happens locally on your machine.</span>
+              <button id="btn-toggle-logs" class="inline-link" type="button">Show Logs</button>
+            </footer>
+
+            <section id="log-panel" class="log-panel" hidden>
+              <div class="log-head">
+                <span>Runtime Logs</span>
+                <button id="btn-clear-log" class="btn btn-mini" type="button">Clear</button>
+              </div>
+              <pre id="log-output" class="log-output"></pre>
+            </section>
+          </section>
+
+          <aside id="settings-drawer" class="settings-drawer" aria-hidden="false">
+            <div class="drawer-head">
+              <h2>Settings</h2>
+              <button id="btn-close-settings" class="btn btn-icon" type="button" aria-label="Close settings">✕</button>
+            </div>
+
+            <form class="drawer-form">
+              <details id="permissions-details" class="perm-card" open>
+                <summary class="perm-summary">
+                  <div>
+                    <h3>Permissions</h3>
+                    <p>Required for full functionality</p>
+                  </div>
+                  <span id="perm-summary-state" class="perm-badge">Unknown</span>
+                </summary>
+                <div class="perm-body">
+                  <div class="perm-head">
+                    <button id="btn-refresh-perm" class="btn btn-mini" type="button">Refresh</button>
+                  </div>
+                  <div class="perm-list">
+                    <div class="perm-row">
+                      <span class="perm-icon">▣</span>
+                      <div>
+                        <strong>Camera</strong>
+                        <small>Needed for hand tracking</small>
+                      </div>
+                      <span id="perm-camera" class="perm-badge">Unknown</span>
+                    </div>
+                    <div class="perm-row">
+                      <span class="perm-icon perm-icon-warn">◎</span>
+                      <div>
+                        <strong>Accessibility</strong>
+                        <small>Needed for system actions</small>
+                      </div>
+                      <span id="perm-accessibility" class="perm-badge">Unknown</span>
+                    </div>
+                  </div>
+                  <div class="perm-actions">
+                    <button id="btn-request-camera" class="btn btn-mini" type="button">Request Camera</button>
+                    <button id="btn-request-accessibility" class="btn btn-mini" type="button">Request Accessibility</button>
+                    <button id="btn-open-perm-settings" class="btn btn-mini" type="button">Open Settings</button>
+                  </div>
+                  <p id="perm-message" class="perm-message" aria-live="polite">Permission status not checked yet.</p>
+                </div>
+              </details>
+
+              <details id="inputs-details">
+                <summary>
+                  <span>
+                    <strong>Inputs</strong>
+                    <small>Configure cameras and devices</small>
+                  </span>
+                </summary>
+                <div class="details-body">
+                  <label class="esp-only">
+                    Serial Port
+                    <input id="serialPort" placeholder="/dev/cu.usbserial-10 or COM3" />
+                  </label>
+
+                  <label class="esp-only">
+                    Serial Baud
+                    <input id="serialBaud" type="number" min="1200" step="100" />
+                  </label>
+
+                  <label class="esp-only">
+                    Replay Input File
+                    <div class="input-with-button">
+                      <input id="inputFile" placeholder="/tmp/hci_test.ndjson" />
+                      <button id="btn-pick-file" class="btn btn-mini" type="button">Browse</button>
+                    </div>
+                  </label>
+
+                  <label class="cv-only">
+                    Camera Index
+                    <input id="cameraIndex" type="number" min="0" step="1" />
+                  </label>
+                </div>
+              </details>
+
+              <details id="advanced-details">
+                <summary>
+                  <span>
+                    <strong>Advanced</strong>
+                    <small>Thresholds, smoothing, and more</small>
+                  </span>
+                </summary>
+                <div class="details-body">
+                  <label>
+                    Platform
+                    <select id="platform">
+                      <option value="auto">Auto</option>
+                      <option value="mac">Mac</option>
+                      <option value="windows">Windows</option>
+                    </select>
+                  </label>
+
+                  <label class="cv-only">
+                    Smooth
+                    <input id="smooth" type="number" min="0.01" max="1" step="0.01" />
+                  </label>
+
+                  <label class="cv-only">
+                    Pinch Threshold
+                    <input id="pinchThreshold" type="number" min="0.005" step="0.001" />
+                  </label>
+
+                  <label class="cv-only">
+                    Drag Hold (ms)
+                    <input id="dragHoldMs" type="number" min="50" step="10" />
+                  </label>
+
+                  <label class="cv-only">
+                    Click Drift (px)
+                    <input id="clickMoveThreshold" type="number" min="2" step="1" />
+                  </label>
+
+                  <label class="toggle-row cv-only">
+                    <span>Headless CV (No Preview Window)</span>
+                    <input id="cvHeadless" type="checkbox" />
+                  </label>
+
+                  <label class="toggle-row cv-only">
+                    <span>Hide CV Overlay</span>
+                    <input id="hideLandmarks" type="checkbox" />
+                  </label>
+
+                  <label class="toggle-row cv-only">
+                    <span>Enable Dictation Hold</span>
+                    <input id="enableDictationHold" type="checkbox" />
+                  </label>
+
+                  <label class="cv-only">
+                    Dictation Hold (ms)
+                    <input id="dictationHoldMs" type="number" min="200" step="10" />
+                  </label>
+
+                  <label class="toggle-row">
+                    <span>Disable Context Routing</span>
+                    <input id="disableContextRouting" type="checkbox" />
+                  </label>
+                </div>
+              </details>
+            </form>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
