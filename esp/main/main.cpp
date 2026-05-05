@@ -111,7 +111,7 @@ void gesture_task(void *pvParameters) {
                 printf("%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
                        acce.acce_x, acce.acce_y, acce.acce_z,
                        gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
-                vTaskDelay(pdMS_TO_TICKS(2000));
+                vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
             }
             printf("---END---\n");
             samples = 0;

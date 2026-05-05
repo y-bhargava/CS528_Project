@@ -21,8 +21,12 @@ from pathlib import Path
 import numpy as np
 import pickle
 
+try:
+    from features import AXIS_COLS, extract_features, load_csv_window
+except ImportError:
+    from .features import AXIS_COLS, extract_features, load_csv_window
+
 MODEL_PATH = Path(__file__).parent / "model_svm.pkl"  # overridden by --model flag
-AXIS_COLS  = ["ax", "ay", "az", "gx", "gy", "gz"]
 
 # Gyro columns are indices 3-5. If the peak gyro magnitude is below this
 # threshold (°/s) the data is considered resting noise — no prediction made.
@@ -39,20 +43,7 @@ def load_model(model_path: Path = MODEL_PATH):
         sys.exit(1)
     with open(model_path, "rb") as fh:
         bundle = pickle.load(fh)
-    return bundle["pipeline"], bundle["gesture_classes"]
-
-
-# ---------------------------------------------------------------------------
-# Feature extraction  (must match train_svm.py exactly)
-# ---------------------------------------------------------------------------
-
-def extract_features(arr: np.ndarray) -> np.ndarray:
-    """arr: (N, 6) → returns (18,) feature vector: max / min / std per axis."""
-    return np.concatenate([
-        arr.max(axis=0),
-        arr.min(axis=0),
-        arr.std(axis=0),
-    ])
+    return bundle["pipeline"], bundle["gesture_classes"], bundle.get("axes", AXIS_COLS)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +65,11 @@ def predict_and_print(arr: np.ndarray, pipeline, gesture_classes: list[str],
         return
 
     features = extract_features(arr).reshape(1, -1)
+    expected = getattr(pipeline, "n_features_in_", features.shape[1])
+    if features.shape[1] != expected:
+        print(f"ERROR: feature mismatch. Model expects {expected}, got {features.shape[1]}.")
+        return
+
     prediction   = pipeline.predict(features)[0]
     gesture_name = gesture_classes[prediction]
 
@@ -104,14 +100,10 @@ def test_file(path: str, pipeline, gesture_classes):
         print(f"ERROR: file not found: {p}")
         sys.exit(1)
 
-    try:
-        arr = np.loadtxt(p, delimiter=",", skiprows=1, dtype=np.float32)
-    except Exception as e:
-        print(f"ERROR reading file: {e}")
+    arr = load_csv_window(p)
+    if arr is None:
+        print(f"ERROR reading file: expected columns {AXIS_COLS} in {p}")
         sys.exit(1)
-
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
 
     print(f"File    : {p.name}")
     print(f"Samples : {len(arr)}")
@@ -220,7 +212,10 @@ def main():
         sys.exit(0)
 
     model_path = Path(args.model) if args.model else MODEL_PATH
-    pipeline, gesture_classes = load_model(model_path)
+    pipeline, gesture_classes, axes = load_model(model_path)
+    if axes != AXIS_COLS:
+        print(f"ERROR: model axes {axes} do not match predictor axes {AXIS_COLS}")
+        sys.exit(1)
 
     if args.file:
         test_file(args.file, pipeline, gesture_classes)
