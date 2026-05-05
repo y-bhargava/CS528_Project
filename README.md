@@ -150,3 +150,90 @@ uv run python host/main.py --mode cv --camera-index 1 --live
 # Hybrid (ESP + CV together)
 uv run python host/main.py --mode hybrid --serial-port /dev/cu.usbserial-10 --camera-index 1 --live
 ```
+
+## Quick Start Commands
+
+Use these as the default launch recipes.
+
+### 0) Setup (once)
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+uv venv .venv
+source .venv/bin/activate
+uv pip install pyautogui opencv-python mediapipe
+```
+
+### 1) CV only (dry-run, safe default)
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+python3 -u host/main.py --mode cv --camera-index 1 --hide-landmarks
+```
+
+### 2) CV only (live actions)
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+python3 -u host/main.py --mode cv --camera-index 1 --live --hide-landmarks
+```
+
+### 3) CV only + dictation hold (Handy-style)
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+python3 -u host/main.py --mode cv --camera-index 1 --live --hide-landmarks --enable-dictation-hold --dictation-hold-ms 550
+```
+
+### 4) Hybrid dry-run using replay gestures
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+
+cat > /tmp/hci_test.ndjson <<'EOF'
+{"type":"gesture","name":"left"}
+{"type":"gesture","name":"right"}
+{"type":"gesture","name":"up"}
+{"type":"gesture","name":"down"}
+EOF
+
+while IFS= read -r line; do
+  sleep 5
+  printf '%s\n' "$line"
+done < /tmp/hci_test.ndjson | python3 -u host/main.py --mode hybrid --input-file /dev/stdin --camera-index 1 --hide-landmarks
+```
+
+### 5) Hybrid live with real ESP serial
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+python3 -u host/main.py --mode hybrid --serial-port /dev/cu.usbserial-10 --serial-baud 115200 --camera-index 1 --live --hide-landmarks
+```
+
+### 6) ESP only (dry-run routing test)
+
+```bash
+cd /Users/rayan/Documents/GitHub/CS528_Project
+source .venv/bin/activate
+python3 -u host/main.py --mode esp --serial-port /dev/cu.usbserial-10 --serial-baud 115200
+```
+
+## Flag Reference
+
+Common flags for `host/main.py`:
+
+- `--mode esp|cv|hybrid`: selects ESP-only, CV-only, or both together.
+- `--live`: enables real OS actions. Omit for dry-run logging only.
+- `--camera-index N`: selects webcam index (your known-good value is often `1`).
+- `--serial-port PATH`: serial device for ESP input (example: `/dev/cu.usbserial-10`).
+- `--serial-baud N`: serial baud rate (default `115200`).
+- `--input-file PATH`: replay NDJSON gestures from file/stdin (for testing without ESP).
+- `--hide-landmarks`: hides hand landmarks and debug overlay text for cleaner/faster preview.
+- `--disable-context-routing`: forces desktop/global profile instead of app-aware mapping.
+- `--enable-dictation-hold`: enables thumbs-up hold -> hold `Fn` (for dictation tools like Handy).
+- `--dictation-hold-ms N`: hold duration before dictation key-down (default `550` ms).
