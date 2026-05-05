@@ -66,6 +66,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable hand landmark overlay drawing for better performance.",
     )
+    parser.add_argument(
+        "--enable-dictation-hold",
+        action="store_true",
+        help="Enable thumbs-up hold to press-and-hold Fn for dictation apps.",
+    )
+    parser.add_argument(
+        "--dictation-hold-ms",
+        type=int,
+        default=550,
+        help="Thumbs-up hold time in ms before dictation key down (default: 550).",
+    )
     return parser
 
 
@@ -86,6 +97,8 @@ class CVCursorConfig:
     scroll_step_pixels: float = 18.0
     on_mode_change: Callable[[str], None] | None = None
     app_poll_interval_seconds: float = 1.0
+    enable_dictation_hold: bool = False
+    dictation_hold_ms: int = 550
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -140,6 +153,40 @@ def _is_pinky_toggle_pose(
     return pinky_up and index_down and middle_down and ring_down and thumb_tucked
 
 
+def _is_thumbs_up_pose(
+    hand_landmarks,
+    mp_hands,
+) -> bool:
+    lm = hand_landmarks.landmark
+
+    def _is_extended(tip_idx, pip_idx) -> bool:
+        return lm[tip_idx].y < (lm[pip_idx].y - 0.03)
+
+    index_down = not _is_extended(
+        mp_hands.HandLandmark.INDEX_FINGER_TIP,
+        mp_hands.HandLandmark.INDEX_FINGER_PIP,
+    )
+    middle_down = not _is_extended(
+        mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
+        mp_hands.HandLandmark.MIDDLE_FINGER_PIP,
+    )
+    ring_down = not _is_extended(
+        mp_hands.HandLandmark.RING_FINGER_TIP,
+        mp_hands.HandLandmark.RING_FINGER_PIP,
+    )
+    pinky_down = not _is_extended(
+        mp_hands.HandLandmark.PINKY_TIP,
+        mp_hands.HandLandmark.PINKY_PIP,
+    )
+
+    thumb_tip = lm[mp_hands.HandLandmark.THUMB_TIP]
+    thumb_ip = lm[mp_hands.HandLandmark.THUMB_IP]
+    thumb_mcp = lm[mp_hands.HandLandmark.THUMB_MCP]
+    thumb_up = thumb_tip.y < (thumb_ip.y - 0.025) and thumb_ip.y < (thumb_mcp.y - 0.015)
+
+    return thumb_up and index_down and middle_down and ring_down and pinky_down
+
+
 def run_cv_cursor(
     config: CVCursorConfig,
     stop_event: threading.Event | None = None,
@@ -182,6 +229,9 @@ def run_cv_cursor(
     mode_hold_seconds = max(0.25, config.mode_toggle_hold_ms / 1000.0)
     scroll_step_pixels = max(4.0, float(config.scroll_step_pixels))
     active_app_name: str | None = None
+    dictation_pose_started_at: float | None = None
+    dictation_key_held = False
+    dictation_hold_seconds = max(0.2, config.dictation_hold_ms / 1000.0)
     app_monitor = FrontmostAppMonitor(
         poll_interval_seconds=config.app_poll_interval_seconds,
     )
@@ -240,6 +290,7 @@ def run_cv_cursor(
                 app_is_mapped = active_app_name in APP_ALIASES
                 cv_drag_mode = current_mode == "global" or not app_is_mapped
                 is_toggle_pose = _is_pinky_toggle_pose(hand, mp_hands)
+                is_dictation_pose = _is_thumbs_up_pose(hand, mp_hands)
                 if is_toggle_pose:
                     if fist_started_at is None:
                         fist_started_at = now
@@ -264,6 +315,27 @@ def run_cv_cursor(
                                     config.on_mode_change(new_mode)
                         except Exception:
                             pass
+
+                if config.enable_dictation_hold and is_dictation_pose:
+                    if dictation_pose_started_at is None:
+                        dictation_pose_started_at = now
+                    if (
+                        not dictation_key_held
+                        and (now - dictation_pose_started_at) >= dictation_hold_seconds
+                    ):
+                        if config.dry_run:
+                            print("[cv] dictation keyDown fn", flush=True)
+                        else:
+                            pyautogui.keyDown("fn")
+                        dictation_key_held = True
+                else:
+                    dictation_pose_started_at = None
+                    if dictation_key_held:
+                        if config.dry_run:
+                            print("[cv] dictation keyUp fn", flush=True)
+                        else:
+                            pyautogui.keyUp("fn")
+                        dictation_key_held = False
 
                 if is_pinching and not was_pinching:
                     pinch_started_at = now
@@ -343,6 +415,8 @@ def run_cv_cursor(
                     ui_state = "SCROLLING"
                 elif is_pinching:
                     ui_state = "CLICK_ARMED"
+                elif config.enable_dictation_hold and is_dictation_pose:
+                    ui_state = "DICTATION_ARMED"
                 elif is_toggle_pose:
                     ui_state = "MODE_ARMED"
                 else:
@@ -364,6 +438,13 @@ def run_cv_cursor(
                 was_scrolling = False
                 last_scroll_ty = None
                 fist_started_at = None
+                dictation_pose_started_at = None
+                if dictation_key_held:
+                    if config.dry_run:
+                        print("[cv] dictation keyUp fn (lost hand)", flush=True)
+                    else:
+                        pyautogui.keyUp("fn")
+                    dictation_key_held = False
                 if config.mode_state is not None:
                     try:
                         current_mode = str(config.mode_state.get_mode())
@@ -387,6 +468,7 @@ def run_cv_cursor(
                     "CLICK_ARMED": (80, 200, 255),
                     "DRAGGING": (60, 60, 255),
                     "SCROLLING": (190, 130, 255),
+                    "DICTATION_ARMED": (255, 120, 120),
                     "MODE_ARMED": (255, 180, 80),
                     "NO_HAND": (180, 180, 180),
                 }.get(ui_state, (255, 255, 255))
@@ -439,6 +521,8 @@ def run_cv_cursor(
     except KeyboardInterrupt:
         pass
     finally:
+        if dictation_key_held and not config.dry_run:
+            pyautogui.keyUp("fn")
         if is_dragging and not config.dry_run:
             pyautogui.mouseUp()
         app_monitor.stop()
@@ -460,6 +544,8 @@ def main() -> int:
         click_move_threshold=args.click_move_threshold,
         dry_run=args.dry_run,
         draw_landmarks=not args.hide_landmarks,
+        enable_dictation_hold=args.enable_dictation_hold,
+        dictation_hold_ms=args.dictation_hold_ms,
     )
     return run_cv_cursor(config)
 
