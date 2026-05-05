@@ -7,12 +7,21 @@ import signal
 import sys
 import threading
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Callable
 
 import cv2  # type: ignore
 import mediapipe as mp  # type: ignore
 import pyautogui
+from app_monitor import FrontmostAppMonitor
+from router import APP_ALIASES
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"SymbolDatabase\.GetPrototype\(\) is deprecated.*",
+    category=UserWarning,
+)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -52,6 +61,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Log cursor actions without moving/clicking the OS cursor.",
     )
+    parser.add_argument(
+        "--hide-landmarks",
+        action="store_true",
+        help="Disable hand landmark overlay drawing for better performance.",
+    )
     return parser
 
 
@@ -65,10 +79,13 @@ class CVCursorConfig:
     dry_run: bool = False
     show_window: bool = True
     window_title: str = "HCI Cursor (q to quit)"
+    draw_landmarks: bool = True
     mode_state: object | None = None
     mode_toggle_hold_ms: int = 650
     mode_toggle_cooldown_ms: int = 1000
+    scroll_step_pixels: float = 18.0
     on_mode_change: Callable[[str], None] | None = None
+    app_poll_interval_seconds: float = 1.0
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -158,12 +175,20 @@ def run_cv_cursor(
     pinch_travel = 0.0
     is_dragging = False
     was_pinching = False
+    was_scrolling = False
+    last_scroll_ty: float | None = None
     last_print = 0.0
     fist_started_at: float | None = None
     mode_hold_seconds = max(0.25, config.mode_toggle_hold_ms / 1000.0)
+    scroll_step_pixels = max(4.0, float(config.scroll_step_pixels))
+    active_app_name: str | None = None
+    app_monitor = FrontmostAppMonitor(
+        poll_interval_seconds=config.app_poll_interval_seconds,
+    )
+    app_monitor.start()
 
     print(
-        "[cv] ready - controls: move=index fingertip, left=thumb+middle (click/drag), mode toggle=pinky-up hold, q=quit",
+        "[cv] ready - controls: move=index fingertip, left=thumb+middle (click/scroll or drag), mode toggle=pinky-up hold, q=quit",
         flush=True,
     )
 
@@ -180,6 +205,7 @@ def run_cv_cursor(
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = hands.process(rgb)
             ui_state = "NO_HAND"
+            cv_drag_mode = True
 
             if result.multi_hand_landmarks:
                 hand = result.multi_hand_landmarks[0]
@@ -202,6 +228,17 @@ def run_cv_cursor(
                 is_pinching = left_pinch_dist < pinch_threshold
 
                 now = time.monotonic()
+                cached_app_name = app_monitor.get_latest()
+                if cached_app_name is not None:
+                    active_app_name = cached_app_name
+                current_mode = "context"
+                if config.mode_state is not None:
+                    try:
+                        current_mode = str(config.mode_state.get_mode())
+                    except Exception:
+                        current_mode = "context"
+                app_is_mapped = active_app_name in APP_ALIASES
+                cv_drag_mode = current_mode == "global" or not app_is_mapped
                 is_toggle_pose = _is_pinky_toggle_pose(hand, mp_hands)
                 if is_toggle_pose:
                     if fist_started_at is None:
@@ -237,12 +274,13 @@ def run_cv_cursor(
                     held = now - pinch_started_at
                     if pinch_anchor_x is not None and pinch_anchor_y is not None:
                         pinch_travel = _distance((tx, ty), (pinch_anchor_x, pinch_anchor_y))
-                    if (held >= drag_hold_seconds or pinch_travel >= drag_start_move_threshold) and not is_dragging:
-                        if config.dry_run:
-                            print("[cv] dragDown", flush=True)
-                        else:
-                            pyautogui.mouseDown()
-                        is_dragging = True
+                    if cv_drag_mode:
+                        if (held >= drag_hold_seconds or pinch_travel >= drag_start_move_threshold) and not is_dragging:
+                            if config.dry_run:
+                                print("[cv] dragDown", flush=True)
+                            else:
+                                pyautogui.mouseDown()
+                            is_dragging = True
 
                 # Keep cursor moving during pinch so drag destination remains visible.
                 cursor_x = _lerp(cursor_x, tx, smooth)
@@ -255,6 +293,25 @@ def run_cv_cursor(
                 else:
                     pyautogui.moveTo(cursor_x, cursor_y, _pause=False)
 
+                is_scrolling = False
+                if not cv_drag_mode and is_pinching:
+                    if last_scroll_ty is None:
+                        last_scroll_ty = ty
+                    dy = last_scroll_ty - ty
+                    steps = int(dy / scroll_step_pixels)
+                    if steps != 0:
+                        is_scrolling = True
+                        if config.dry_run:
+                            print(f"[cv] scroll steps={steps}", flush=True)
+                        else:
+                            pyautogui.scroll(steps)
+                        # Preserve fractional remainder by resetting relative to consumed steps.
+                        last_scroll_ty = ty + (dy - (steps * scroll_step_pixels))
+                    else:
+                        last_scroll_ty = ty
+                else:
+                    last_scroll_ty = None
+
                 if not is_pinching and was_pinching:
                     held = 0.0
                     if pinch_started_at is not None:
@@ -265,7 +322,7 @@ def run_cv_cursor(
                         else:
                             pyautogui.mouseUp()
                         is_dragging = False
-                    elif held < drag_hold_seconds and pinch_travel <= click_move_threshold:
+                    elif held < drag_hold_seconds and pinch_travel <= click_move_threshold and not was_scrolling:
                         if config.dry_run:
                             print("[cv] click", flush=True)
                         else:
@@ -278,16 +335,20 @@ def run_cv_cursor(
                     pinch_travel = 0.0
 
                 was_pinching = is_pinching
+                was_scrolling = is_scrolling
 
                 if is_dragging:
                     ui_state = "DRAGGING"
+                elif is_scrolling:
+                    ui_state = "SCROLLING"
                 elif is_pinching:
                     ui_state = "CLICK_ARMED"
                 elif is_toggle_pose:
                     ui_state = "MODE_ARMED"
                 else:
                     ui_state = "MOVE"
-                mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
+                if config.draw_landmarks:
+                    mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
             else:
                 if was_pinching and is_dragging:
                     if config.dry_run:
@@ -300,6 +361,8 @@ def run_cv_cursor(
                 pinch_anchor_x = None
                 pinch_anchor_y = None
                 pinch_travel = 0.0
+                was_scrolling = False
+                last_scroll_ty = None
                 fist_started_at = None
                 if config.mode_state is not None:
                     try:
@@ -318,33 +381,55 @@ def run_cv_cursor(
                 except Exception:
                     current_mode = "context"
 
-            state_color = {
-                "MOVE": (80, 220, 80),
-                "CLICK_ARMED": (80, 200, 255),
-                "DRAGGING": (60, 60, 255),
-                "MODE_ARMED": (255, 180, 80),
-                "NO_HAND": (180, 180, 180),
-            }.get(ui_state, (255, 255, 255))
-            cv2.putText(
-                frame,
-                f"STATE: {ui_state}",
-                (16, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                state_color,
-                2,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                frame,
-                f"MODE: {current_mode.upper()}",
-                (16, 58),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (240, 240, 240),
-                2,
-                cv2.LINE_AA,
-            )
+            if config.draw_landmarks:
+                state_color = {
+                    "MOVE": (80, 220, 80),
+                    "CLICK_ARMED": (80, 200, 255),
+                    "DRAGGING": (60, 60, 255),
+                    "SCROLLING": (190, 130, 255),
+                    "MODE_ARMED": (255, 180, 80),
+                    "NO_HAND": (180, 180, 180),
+                }.get(ui_state, (255, 255, 255))
+                cv2.putText(
+                    frame,
+                    f"STATE: {ui_state}",
+                    (16, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    state_color,
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    f"MODE: {current_mode.upper()}",
+                    (16, 58),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (240, 240, 240),
+                    2,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    f"APP: {(active_app_name or 'Unknown')}",
+                    (16, 84),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (220, 220, 220),
+                    1,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    frame,
+                    f"CV_BEHAVIOR: {'DRAG' if cv_drag_mode else 'SCROLL'}",
+                    (16, 106),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (220, 220, 220),
+                    1,
+                    cv2.LINE_AA,
+                )
 
             if config.show_window:
                 cv2.imshow(config.window_title, frame)
@@ -356,6 +441,7 @@ def run_cv_cursor(
     finally:
         if is_dragging and not config.dry_run:
             pyautogui.mouseUp()
+        app_monitor.stop()
         cap.release()
         hands.close()
         if config.show_window:
@@ -373,6 +459,7 @@ def main() -> int:
         drag_hold_ms=args.drag_hold_ms,
         click_move_threshold=args.click_move_threshold,
         dry_run=args.dry_run,
+        draw_landmarks=not args.hide_landmarks,
     )
     return run_cv_cursor(config)
 

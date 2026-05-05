@@ -113,7 +113,8 @@ Controls:
 
 - Move index fingertip to move cursor
 - Quick pinch (thumb + middle) to click
-- Pinch and hold (thumb + middle) to drag
+- Mapped app + context mode: pinch + vertical move to scroll
+- Unmapped app or global clutch mode: pinch and hold to drag
 - Hold pinky-up pose (other fingers down) briefly to toggle routing mode (`CONTEXT`/`GLOBAL`)
 - Press `q` to quit
 

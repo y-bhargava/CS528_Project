@@ -78,6 +78,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Max cursor drift in px for pinch-click (default: 24).",
     )
     parser.add_argument(
+        "--hide-landmarks",
+        action="store_true",
+        help="Disable CV landmark overlay drawing for better performance.",
+    )
+    parser.add_argument(
         "--disable-context-routing",
         action="store_true",
         help="Force global desktop profile instead of app-aware routing.",
@@ -227,6 +232,7 @@ def _build_cv_config(args: argparse.Namespace, dry_run: bool, mode_state: ModeSt
         dry_run=dry_run,
         show_window=True,
         window_title="HCI Cursor (q to quit)",
+        draw_landmarks=not args.hide_landmarks,
         mode_state=mode_state,
         on_mode_change=_on_mode_change,
     )
