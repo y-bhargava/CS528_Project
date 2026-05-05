@@ -182,6 +182,9 @@ python3 -u host/main.py --mode cv --camera-index 1 --live --hide-landmarks
 
 ### 3) CV only + dictation hold (Handy-style)
 
+Prerequisite: install and configure a push-to-talk transcription app that uses held `Fn`
+(for example Handy: https://handy.computer/download).
+
 ```bash
 cd /Users/rayan/Documents/GitHub/CS528_Project
 source .venv/bin/activate
