@@ -114,6 +114,7 @@ Controls:
 - Move index fingertip to move cursor
 - Quick pinch (thumb + middle) to click
 - Pinch and hold (thumb + middle) to drag
+- Hold pinky-up pose (other fingers down) briefly to toggle routing mode (`CONTEXT`/`GLOBAL`)
 - Press `q` to quit
 
 ## Unified Host Runner Modes
@@ -123,6 +124,18 @@ The host supports 3 modes in one entrypoint:
 - `--mode esp`: ESP/NDJSON listener only (default)
 - `--mode cv`: CV cursor controller only
 - `--mode hybrid`: ESP + CV together (threaded single-process)
+
+Context-aware ESP routing profiles:
+
+- `Google Chrome`: left/right/up/down -> prev tab/next tab/new tab/close tab
+- `Keynote` or `Microsoft PowerPoint`: left/right/up/down -> prev slide/next slide/start/exit presentation
+- `Spotify`: left/right/up/down -> prev track/next track/volume up/volume down
+- fallback/global desktop: left/right/up/down -> switch space left/right, mission control, show desktop
+
+Touchless global switch:
+
+- CV pinky-up hold toggles routing mode between `CONTEXT` and `GLOBAL`
+- In `GLOBAL` mode, ESP gestures always use desktop mappings for app/window switching
 
 Examples:
 

@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2  # type: ignore
 import mediapipe as mp  # type: ignore
@@ -64,6 +65,10 @@ class CVCursorConfig:
     dry_run: bool = False
     show_window: bool = True
     window_title: str = "HCI Cursor (q to quit)"
+    mode_state: object | None = None
+    mode_toggle_hold_ms: int = 650
+    mode_toggle_cooldown_ms: int = 1000
+    on_mode_change: Callable[[str], None] | None = None
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -76,6 +81,46 @@ def _lerp(prev: float, nxt: float, alpha: float) -> float:
 
 def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _is_pinky_toggle_pose(
+    hand_landmarks,
+    mp_hands,
+) -> bool:
+    lm = hand_landmarks.landmark
+
+    def _is_extended(tip_idx, pip_idx) -> bool:
+        # In flipped selfie view, lower y is generally "up/extended".
+        return lm[tip_idx].y < (lm[pip_idx].y - 0.03)
+
+    pinky_up = _is_extended(
+        mp_hands.HandLandmark.PINKY_TIP,
+        mp_hands.HandLandmark.PINKY_PIP,
+    )
+    index_down = not _is_extended(
+        mp_hands.HandLandmark.INDEX_FINGER_TIP,
+        mp_hands.HandLandmark.INDEX_FINGER_PIP,
+    )
+    middle_down = not _is_extended(
+        mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
+        mp_hands.HandLandmark.MIDDLE_FINGER_PIP,
+    )
+    ring_down = not _is_extended(
+        mp_hands.HandLandmark.RING_FINGER_TIP,
+        mp_hands.HandLandmark.RING_FINGER_PIP,
+    )
+
+    thumb_tip = (
+        lm[mp_hands.HandLandmark.THUMB_TIP].x,
+        lm[mp_hands.HandLandmark.THUMB_TIP].y,
+    )
+    middle_mcp = (
+        lm[mp_hands.HandLandmark.MIDDLE_FINGER_MCP].x,
+        lm[mp_hands.HandLandmark.MIDDLE_FINGER_MCP].y,
+    )
+    thumb_tucked = _distance(thumb_tip, middle_mcp) < 0.18
+
+    return pinky_up and index_down and middle_down and ring_down and thumb_tucked
 
 
 def run_cv_cursor(
@@ -114,9 +159,11 @@ def run_cv_cursor(
     is_dragging = False
     was_pinching = False
     last_print = 0.0
+    fist_started_at: float | None = None
+    mode_hold_seconds = max(0.25, config.mode_toggle_hold_ms / 1000.0)
 
     print(
-        "[cv] ready - controls: move=index fingertip, left=thumb+middle (click/drag), q=quit",
+        "[cv] ready - controls: move=index fingertip, left=thumb+middle (click/drag), mode toggle=pinky-up hold, q=quit",
         flush=True,
     )
 
@@ -155,6 +202,32 @@ def run_cv_cursor(
                 is_pinching = left_pinch_dist < pinch_threshold
 
                 now = time.monotonic()
+                is_toggle_pose = _is_pinky_toggle_pose(hand, mp_hands)
+                if is_toggle_pose:
+                    if fist_started_at is None:
+                        fist_started_at = now
+                    ready = now - fist_started_at >= mode_hold_seconds
+                    if ready and config.mode_state is not None:
+                        try:
+                            current_mode = str(config.mode_state.get_mode())
+                            if current_mode != "global":
+                                new_mode = config.mode_state.set_mode("global")
+                                if config.on_mode_change is not None:
+                                    config.on_mode_change(new_mode)
+                        except Exception:
+                            pass
+                else:
+                    fist_started_at = None
+                    if config.mode_state is not None:
+                        try:
+                            current_mode = str(config.mode_state.get_mode())
+                            if current_mode != "context":
+                                new_mode = config.mode_state.set_mode("context")
+                                if config.on_mode_change is not None:
+                                    config.on_mode_change(new_mode)
+                        except Exception:
+                            pass
+
                 if is_pinching and not was_pinching:
                     pinch_started_at = now
                     pinch_anchor_x = cursor_x
@@ -210,6 +283,8 @@ def run_cv_cursor(
                     ui_state = "DRAGGING"
                 elif is_pinching:
                     ui_state = "CLICK_ARMED"
+                elif is_toggle_pose:
+                    ui_state = "MODE_ARMED"
                 else:
                     ui_state = "MOVE"
                 mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
@@ -225,11 +300,29 @@ def run_cv_cursor(
                 pinch_anchor_x = None
                 pinch_anchor_y = None
                 pinch_travel = 0.0
+                fist_started_at = None
+                if config.mode_state is not None:
+                    try:
+                        current_mode = str(config.mode_state.get_mode())
+                        if current_mode != "context":
+                            new_mode = config.mode_state.set_mode("context")
+                            if config.on_mode_change is not None:
+                                config.on_mode_change(new_mode)
+                    except Exception:
+                        pass
+
+            current_mode = "context"
+            if config.mode_state is not None:
+                try:
+                    current_mode = str(config.mode_state.get_mode())
+                except Exception:
+                    current_mode = "context"
 
             state_color = {
                 "MOVE": (80, 220, 80),
                 "CLICK_ARMED": (80, 200, 255),
                 "DRAGGING": (60, 60, 255),
+                "MODE_ARMED": (255, 180, 80),
                 "NO_HAND": (180, 180, 180),
             }.get(ui_state, (255, 255, 255))
             cv2.putText(
@@ -239,6 +332,16 @@ def run_cv_cursor(
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 state_color,
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                frame,
+                f"MODE: {current_mode.upper()}",
+                (16, 58),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (240, 240, 240),
                 2,
                 cv2.LINE_AA,
             )

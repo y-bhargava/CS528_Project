@@ -8,6 +8,8 @@ import threading
 import time
 from typing import Iterable
 
+from app_context import get_frontmost_app_name
+from control_mode import ModeState
 from executor import execute_action
 from input_sources import (
     iter_ndjson_file,
@@ -15,7 +17,7 @@ from input_sources import (
     iter_ndjson_stdin,
 )
 from message_parser import parse_ndjson_line
-from router import route_gesture
+from router import route_gesture_for_context
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -75,6 +77,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=24.0,
         help="Max cursor drift in px for pinch-click (default: 24).",
     )
+    parser.add_argument(
+        "--disable-context-routing",
+        action="store_true",
+        help="Force global desktop profile instead of app-aware routing.",
+    )
     return parser
 
 
@@ -100,21 +107,66 @@ def _announce_live_mode() -> None:
     print("[live] live execution active", flush=True)
 
 
-def _handle_gesture(gesture_name: str, dry_run: bool, line_number: int) -> None:
-    action = route_gesture(gesture_name)
-    if action is not None:
-        print(f"type=gesture name={gesture_name} action={action}", flush=True)
-        execute_action(action, dry_run=dry_run)
-    else:
-        print(f"type=gesture name={gesture_name} action=<unmapped>", flush=True)
+def _handle_gesture(
+    gesture_name: str,
+    dry_run: bool,
+    line_number: int,
+    mode_state: ModeState,
+    disable_context_routing: bool,
+) -> None:
+    mode = mode_state.get_mode()
+    active_app = None if disable_context_routing else get_frontmost_app_name()
+    if disable_context_routing:
+        mode = "global"
+
+    resolution = route_gesture_for_context(
+        gesture_name=gesture_name,
+        active_app_name=active_app,
+        mode=mode,
+    )
+    if resolution.action is not None:
         print(
-            f"[warning] line={line_number} unknown gesture name={gesture_name}",
-            file=sys.stderr,
+            " ".join(
+                (
+                    "type=gesture",
+                    f"name={gesture_name}",
+                    f"mode={mode}",
+                    f"app={active_app or '<unknown>'}",
+                    f"profile={resolution.profile}",
+                    f"action={resolution.action}",
+                )
+            ),
             flush=True,
         )
+        execute_action(resolution.action, dry_run=dry_run)
+        return
+
+    print(
+        " ".join(
+            (
+                "type=gesture",
+                f"name={gesture_name}",
+                f"mode={mode}",
+                f"app={active_app or '<unknown>'}",
+                f"profile={resolution.profile}",
+                "action=<unmapped>",
+            )
+        ),
+        flush=True,
+    )
+    print(
+        f"[warning] line={line_number} unknown gesture name={gesture_name}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
-def _run_esp_pipeline(args: argparse.Namespace, dry_run: bool, stop_event: threading.Event | None = None) -> int:
+def _run_esp_pipeline(
+    args: argparse.Namespace,
+    dry_run: bool,
+    mode_state: ModeState,
+    stop_event: threading.Event | None = None,
+) -> int:
     try:
         lines = _select_input_lines(args)
     except ValueError as exc:
@@ -137,7 +189,13 @@ def _run_esp_pipeline(args: argparse.Namespace, dry_run: bool, stop_event: threa
                 name = message.get("name")
                 if isinstance(name, str) and name.strip():
                     gesture_name = name.strip()
-                    _handle_gesture(gesture_name, dry_run=dry_run, line_number=line_number)
+                    _handle_gesture(
+                        gesture_name,
+                        dry_run=dry_run,
+                        line_number=line_number,
+                        mode_state=mode_state,
+                        disable_context_routing=args.disable_context_routing,
+                    )
                 else:
                     print("type=gesture name=<missing>", flush=True)
                     print(
@@ -154,8 +212,11 @@ def _run_esp_pipeline(args: argparse.Namespace, dry_run: bool, stop_event: threa
     return 0
 
 
-def _build_cv_config(args: argparse.Namespace, dry_run: bool):
+def _build_cv_config(args: argparse.Namespace, dry_run: bool, mode_state: ModeState):
     from cv_cursor import CVCursorConfig
+
+    def _on_mode_change(new_mode: str) -> None:
+        print(f"[mode] switched to {new_mode}", flush=True)
 
     return CVCursorConfig(
         camera_index=args.camera_index,
@@ -166,23 +227,26 @@ def _build_cv_config(args: argparse.Namespace, dry_run: bool):
         dry_run=dry_run,
         show_window=True,
         window_title="HCI Cursor (q to quit)",
+        mode_state=mode_state,
+        on_mode_change=_on_mode_change,
     )
 
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
     dry_run = not args.live
+    mode_state = ModeState()
 
     if args.live:
         _announce_live_mode()
 
     if args.mode == "esp":
-        return _run_esp_pipeline(args, dry_run=dry_run)
+        return _run_esp_pipeline(args, dry_run=dry_run, mode_state=mode_state)
 
     if args.mode == "cv":
         from cv_cursor import run_cv_cursor
 
-        return run_cv_cursor(_build_cv_config(args, dry_run=dry_run))
+        return run_cv_cursor(_build_cv_config(args, dry_run=dry_run, mode_state=mode_state))
 
     if not args.serial_port and not args.input_file:
         print(
@@ -195,7 +259,12 @@ def main() -> int:
     esp_result = {"code": 0}
 
     def _esp_worker() -> None:
-        esp_result["code"] = _run_esp_pipeline(args, dry_run=dry_run, stop_event=stop_event)
+        esp_result["code"] = _run_esp_pipeline(
+            args,
+            dry_run=dry_run,
+            mode_state=mode_state,
+            stop_event=stop_event,
+        )
         stop_event.set()
 
     esp_thread = threading.Thread(target=_esp_worker, name="esp-listener", daemon=True)
@@ -204,7 +273,10 @@ def main() -> int:
 
     cv_code = 0
     try:
-        cv_code = run_cv_cursor(_build_cv_config(args, dry_run=dry_run), stop_event=stop_event)
+        cv_code = run_cv_cursor(
+            _build_cv_config(args, dry_run=dry_run, mode_state=mode_state),
+            stop_event=stop_event,
+        )
     finally:
         stop_event.set()
         esp_thread.join(timeout=2.0)
