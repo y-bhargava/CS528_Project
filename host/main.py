@@ -10,6 +10,7 @@ from typing import Iterable
 
 from app_context import get_frontmost_app_name
 from control_mode import ModeState
+import executor
 from executor import execute_action
 from input_sources import (
     iter_ndjson_file,
@@ -141,6 +142,22 @@ def _handle_gesture(
         mode=mode,
     )
     if resolution.action is not None:
+        if executor.IS_PAUSED and resolution.action != "TOGGLE_PAUSE":
+            print(
+                " ".join(
+                    (
+                        "type=gesture",
+                        f"name={gesture_name}",
+                        f"mode={mode}",
+                        f"app={active_app or '<unknown>'}",
+                        f"profile={resolution.profile}",
+                        f"action={resolution.action}",
+                        "result=skipped_paused",
+                    )
+                ),
+                flush=True,
+            )
+            return
         print(
             " ".join(
                 (
