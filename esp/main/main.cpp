@@ -22,7 +22,7 @@ extern "C" {
 #define GYRO_TRIGGER_THRESHOLD  50.0f
 
 static mpu6050_handle_t mpu6050 = NULL;
-Eloquent::ML::Port::SVM classifier;
+Eloquent::ML::Port::LDA classifier;
 const char* gesture_names[] = {"left", "right", "up", "down", "twist"};
 
 float ring_ax[CAPTURE_SIZE], ring_ay[CAPTURE_SIZE], ring_az[CAPTURE_SIZE];
@@ -80,10 +80,10 @@ void run_prediction(int head) {
 
     float features[18];
     extract_features(features);
-    scale_features(features);   // ← apply StandardScaler before SVM
+    scale_features(features);   // apply StandardScaler before classifier
 
     int class_idx = classifier.predict(features);
-    printf("{\"type\":\"gesture\",\"name\":\"%s\",\"source\":\"svm\"}\n",
+    printf("{\"type\":\"gesture\",\"name\":\"%s\",\"source\":\"lda\"}\n",
            gesture_names[class_idx]);
 }
 

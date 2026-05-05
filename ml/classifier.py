@@ -8,9 +8,12 @@ from pathlib import Path
 
 import numpy as np
 
-from model import AXES, GESTURE_CLASSES, WINDOW_SIZE
+try:
+    from features import AXIS_COLS, WINDOW_SIZE, extract_features
+except ImportError:
+    from .features import AXIS_COLS, WINDOW_SIZE, extract_features
 
-SVM_MODEL_PATH = Path(__file__).parent / "model_svm.pkl"
+MODEL_PATH = Path(__file__).parent / "model_svm.pkl"
 
 STRIDE = 25
 
@@ -36,43 +39,45 @@ def _parse_imu_line(line: str) -> list[float] | None:
     if msg.get("type") != "imu":
         return None
     try:
-        return [float(msg[ax]) for ax in AXES]
+        return [float(msg[ax]) for ax in AXIS_COLS]
     except (KeyError, ValueError, TypeError):
         return None
-
-def _extract_features(window: np.ndarray) -> np.ndarray:
-    mean = window.mean(axis=0)
-    std = window.std(axis=0)
-    maximum = window.max(axis=0)
-    minimum = window.min(axis=0)
-    rms = np.sqrt((window ** 2).mean(axis=0))
-    return np.concatenate([mean, std, maximum, minimum, rms])
 
 def _emit_gesture(name: str, confidence: float) -> None:
     msg = {
         "type": "gesture",
         "name": name,
         "confidence": round(confidence, 3),
-        "source": "svm",
+        "source": "ml",
     }
     print(json.dumps(msg, separators=(",", ":")), flush=True)
 
 
 def main() -> int:
-    if not SVM_MODEL_PATH.exists():
+    if not MODEL_PATH.exists():
         print(
-            f"[classifier] model not found: {SVM_MODEL_PATH}\n"
+            f"[classifier] model not found: {MODEL_PATH}\n"
             f"[classifier] Run 'python ml/train_svm.py' first.",
             file=sys.stderr,
         )
         return 1
 
-    print("[classifier] Loading SVM model...", file=sys.stderr, flush=True)
-    with open(SVM_MODEL_PATH, "rb") as fh:
-        pipeline = pickle.load(fh)["pipeline"]
+    print("[classifier] Loading gesture model...", file=sys.stderr, flush=True)
+    with open(MODEL_PATH, "rb") as fh:
+        bundle = pickle.load(fh)
+    pipeline = bundle["pipeline"]
+    gesture_classes = bundle["gesture_classes"]
+    model_type = bundle.get("model_type", "unknown")
+    axes = bundle.get("axes", AXIS_COLS)
+    if axes != AXIS_COLS:
+        print(
+            f"[classifier] model axes {axes} do not match runtime axes {AXIS_COLS}",
+            file=sys.stderr,
+        )
+        return 1
 
     print(
-        f"[classifier] Ready. Classes: {GESTURE_CLASSES}. "
+        f"[classifier] Ready ({model_type}). Classes: {gesture_classes}. "
         f"Window={WINDOW_SIZE} Stride={STRIDE} Threshold={CONFIDENCE_THRESHOLD}",
         file=sys.stderr,
         flush=True,
@@ -96,11 +101,20 @@ def main() -> int:
         samples_since_last_inference = 0
 
         window = np.array(buffer, dtype=np.float32)
-        features = _extract_features(window).reshape(1, -1)
+        features = extract_features(window).reshape(1, -1)
+        expected = getattr(pipeline, "n_features_in_", features.shape[1])
+        if features.shape[1] != expected:
+            print(
+                f"[classifier] feature mismatch: model expects {expected}, "
+                f"runtime produced {features.shape[1]}",
+                file=sys.stderr,
+            )
+            return 1
+
         probs = pipeline.predict_proba(features)[0]
         pred_idx = int(np.argmax(probs))
         confidence = float(probs[pred_idx])
-        gesture = GESTURE_CLASSES[pred_idx]
+        gesture = gesture_classes[pred_idx]
 
         if confidence < CONFIDENCE_THRESHOLD:
             print(
