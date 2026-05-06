@@ -4,7 +4,7 @@ import time
 import sys
 
 PORT = "COM3"
-TARGET_SAMPLES = 100
+TARGET_SAMPLES = 200
 
 print("Which gesture are you recording?")
 # Add 'fist' to the prompt

@@ -60,6 +60,7 @@ def extract_features(window: np.ndarray) -> np.ndarray:
         window.max(axis=0),
         window.min(axis=0),
         window.std(axis=0),
+        window.mean(axis=0) 
     ])
 
 
