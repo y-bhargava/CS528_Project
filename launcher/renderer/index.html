@@ -120,7 +120,12 @@
                 <div class="details-body">
                   <label class="esp-only">
                     Serial Port
-                    <input id="serialPort" placeholder="/dev/cu.usbserial-10 or COM3" />
+                    <div class="input-with-button">
+                      <select id="serialPort" aria-label="Serial Port">
+                        <option value="">Select a serial port</option>
+                      </select>
+                      <button id="btn-refresh-ports" class="btn btn-mini" type="button">Refresh</button>
+                    </div>
                   </label>
 
                   <label class="esp-only">

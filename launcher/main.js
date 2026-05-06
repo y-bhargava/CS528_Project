@@ -70,7 +70,10 @@ function listLikelySerialPorts() {
 
   try {
     const entries = fs.readdirSync("/dev");
-    const patterns = [/^cu\./, /^tty\./, /^ttyUSB/, /^ttyACM/];
+    const patterns =
+      process.platform === "darwin"
+        ? [/^cu\./]
+        : [/^ttyUSB/, /^ttyACM/, /^rfcomm/, /^ttyS/];
     return entries
       .filter((name) => patterns.some((re) => re.test(name)))
       .map((name) => path.join("/dev", name))

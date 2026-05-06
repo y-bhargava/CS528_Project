@@ -20,6 +20,9 @@ const formIds = [
 ];
 
 const browserPreviewLauncher = {
+  getRuntime: async () => ({
+    likelySerialPorts: ["/dev/cu.usbserial-10", "/dev/cu.usbmodemXXXX"],
+  }),
   getConfig: async () => ({
     mode: "cv",
     platform: "auto",
@@ -76,6 +79,7 @@ const logPanel = document.getElementById("log-panel");
 const logOutput = document.getElementById("log-output");
 
 const pickFileButton = document.getElementById("btn-pick-file");
+const refreshPortsButton = document.getElementById("btn-refresh-ports");
 const refreshPermButton = document.getElementById("btn-refresh-perm");
 const requestCameraButton = document.getElementById("btn-request-camera");
 const requestAccessibilityButton = document.getElementById("btn-request-accessibility");
@@ -90,6 +94,7 @@ let lineCount = 0;
 let logsVisible = false;
 let cachedPermissions = null;
 let settingsVisible = true;
+let cachedSerialPorts = [];
 
 function isCheckedInput(id) {
   return [
@@ -116,7 +121,56 @@ function getFormConfig() {
   return config;
 }
 
+function renderSerialPortOptions(ports, selectedValue = "") {
+  const serialField = fields.serialPort;
+  if (!serialField) {
+    return;
+  }
+
+  const uniquePorts = [...new Set((ports || []).map((p) => String(p).trim()).filter(Boolean))];
+  cachedSerialPorts = uniquePorts;
+  serialField.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = uniquePorts.length > 0 ? "Select a serial port" : "No serial ports found";
+  serialField.appendChild(placeholder);
+
+  for (const port of uniquePorts) {
+    const option = document.createElement("option");
+    option.value = port;
+    option.textContent = port;
+    serialField.appendChild(option);
+  }
+
+  if (selectedValue && uniquePorts.includes(selectedValue)) {
+    serialField.value = selectedValue;
+  } else {
+    serialField.value = "";
+  }
+}
+
+async function refreshSerialPorts() {
+  const selectedBefore = String(fields.serialPort?.value || "");
+  try {
+    const runtime = await launcherApi.getRuntime();
+    const detected = runtime?.likelySerialPorts || [];
+    renderSerialPortOptions(detected, selectedBefore);
+    if (selectedBefore && fields.serialPort.value !== selectedBefore) {
+      appendLog(`serial port '${selectedBefore}' is not currently detected`, "err");
+    }
+  } catch (error) {
+    appendLog(`serial port refresh failed: ${error}`, "err");
+  }
+}
+
 function applyConfig(config) {
+  const selectedPort = String(config.serialPort || "");
+  if (selectedPort && !cachedSerialPorts.includes(selectedPort)) {
+    cachedSerialPorts = [...cachedSerialPorts, selectedPort];
+  }
+  renderSerialPortOptions(cachedSerialPorts, selectedPort);
+
   for (const [id, el] of Object.entries(fields)) {
     if (!el || !(id in config)) {
       continue;
@@ -346,6 +400,12 @@ function bindEvents() {
       scheduleSave();
     }
   });
+  if (refreshPortsButton) {
+    refreshPortsButton.addEventListener("click", async () => {
+      await refreshSerialPorts();
+      scheduleSave();
+    });
+  }
 
   refreshPermButton.addEventListener("click", refreshPermissions);
 
@@ -475,6 +535,7 @@ async function bootstrap() {
   setLogsVisible(false);
   setDrawerOpen(true);
 
+  await refreshSerialPorts();
   const config = await launcherApi.getConfig();
   applyConfig(config);
   await refreshPermissions();
