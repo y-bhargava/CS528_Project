@@ -90,6 +90,9 @@ def route_gesture_for_context(
     mode: str,
 ) -> RouteResolution:
     """Resolve action from gesture using app-aware routing profile."""
+    if gesture_name == "twist":
+        return RouteResolution(action="TOGGLE_PAUSE", profile="global")
+
     profile = resolve_profile(active_app_name=active_app_name, mode=mode)
     action = PROFILE_MAPPINGS.get(profile, {}).get(gesture_name)
     return RouteResolution(action=action, profile=profile)
