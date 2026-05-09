@@ -71,6 +71,18 @@ If your system uses a different combo, update your OS/app shortcut or change the
 3. Drag `Touchless Launcher` to `Applications`.
 4. Launch from `Applications` (not from DMG volume).
 
+> [!WARNING]
+> Current public DMG is unsigned/not notarized. On first launch, macOS may show:
+> `"Touchless Launcher" is damaged and can’t be opened.`
+> This is Gatekeeper quarantine behavior for unsigned apps.
+>
+> If this happens, use one of these:
+> - UI path: `System Settings -> Privacy & Security -> Open Anyway` for Touchless Launcher
+> - Terminal path:
+>   `xattr -dr com.apple.quarantine "/Applications/Touchless Launcher.app"`
+>   then
+>   `open "/Applications/Touchless Launcher.app"`
+
 ### 2) Permissions
 
 In launcher settings:
