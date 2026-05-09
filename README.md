@@ -66,7 +66,7 @@ If your system uses a different combo, update your OS/app shortcut or change the
 
 ### 1) Install
 
-1. Download latest `Touchless Launcher-*.dmg` from project release assets.
+1. Download latest `Touchless Launcher-*.dmg` from [GitHub Releases](https://github.com/y-bhargava/CS528_Project/releases/latest).
 2. Open the DMG.
 3. Drag `Touchless Launcher` to `Applications`.
 4. Launch from `Applications` (not from DMG volume).
