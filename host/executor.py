@@ -5,6 +5,7 @@ from typing import Callable
 import subprocess
 import sys
 import time
+import os
 
 from app_context import get_frontmost_app_name
 from platform_util import is_windows
@@ -28,9 +29,10 @@ LIVE_ACTION_COOLDOWNS: dict[str, float] = {
     "SWITCH_SPACE_LEFT": 0.85,
     "SWITCH_SPACE_RIGHT": 0.85,
     "MISSION_CONTROL": 0.85,
-    "SHOW_DESKTOP": 0.85,
+    "TRIGGER_SEARCH": 0.85,
     "PAGE_UP": 0.35,
     "PAGE_DOWN": 0.35,
+    "PRESS_ENTER": 0.20,
     "TOGGLE_PAUSE": 0.35,
 }
 
@@ -96,6 +98,11 @@ def _run_page_up() -> None:
 def _run_page_down() -> None:
     pyautogui = _get_pyautogui()
     pyautogui.press("pagedown")
+
+
+def _run_press_enter() -> None:
+    pyautogui = _get_pyautogui()
+    pyautogui.press("enter")
 
 
 def _run_close_tab() -> None:
@@ -267,12 +274,13 @@ def _run_mission_control() -> None:
     pyautogui.hotkey("ctrl", "up")
 
 
-def _run_show_desktop() -> None:
+def _run_trigger_search() -> None:
     pyautogui = _get_pyautogui()
     if is_windows():
         pyautogui.hotkey("win", "d")
         return
-    pyautogui.hotkey("command", "f3")
+    # macOS Spotlight custom chord.
+    pyautogui.hotkey("command", "option", "space")
 
 
 ACTION_HANDLERS: dict[str, Callable[[], None]] = {
@@ -292,9 +300,10 @@ ACTION_HANDLERS: dict[str, Callable[[], None]] = {
     "SWITCH_SPACE_LEFT": _run_switch_space_left,
     "SWITCH_SPACE_RIGHT": _run_switch_space_right,
     "MISSION_CONTROL": _run_mission_control,
-    "SHOW_DESKTOP": _run_show_desktop,
+    "TRIGGER_SEARCH": _run_trigger_search,
     "PAGE_UP": _run_page_up,
     "PAGE_DOWN": _run_page_down,
+    "PRESS_ENTER": _run_press_enter,
     "TOGGLE_PAUSE": _run_toggle_pause,
 }
 
@@ -319,6 +328,13 @@ def execute_action(action: str, dry_run: bool = True) -> None:
         if remaining > 0:
             print(f"skip action={action} reason=cooldown remaining={remaining:.2f}")
             return
+
+    # In external-executor mode, host performs routing/cooldowns only and
+    # delegates actual OS event injection to launcher.
+    if os.environ.get("TOUCHLESS_EXTERNAL_EXECUTOR", "0") == "1":
+        print(f"execute action={action} mode=external")
+        _LAST_LIVE_EXECUTION[action] = now
+        return
 
     try:
         handler()

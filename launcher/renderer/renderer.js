@@ -17,6 +17,7 @@ const formIds = [
   "enableDictationHold",
   "dictationHoldMs",
   "disableContextRouting",
+  "desktopUpEnter",
 ];
 
 const browserPreviewLauncher = {
@@ -40,6 +41,7 @@ const browserPreviewLauncher = {
     enableDictationHold: false,
     dictationHoldMs: 550,
     disableContextRouting: false,
+    desktopUpEnter: false,
   }),
   saveConfig: async () => ({ ok: true }),
   startRun: async () => ({ ok: true, pid: "preview" }),
@@ -55,8 +57,14 @@ const browserPreviewLauncher = {
     ok: true,
     message: `Preview settings opened for ${kind}.`,
   }),
+  flashEsp: async (serialPort) => ({ ok: true, message: `Preview flashed ${serialPort}.` }),
+  stopFlashEsp: async () => ({ ok: true, message: "Preview flash stop requested." }),
+  startVerifyEspStream: async (serialPort) => ({ ok: true, message: `Preview verify started on ${serialPort}.` }),
+  stopVerifyEspStream: async () => ({ ok: true, message: "Preview verify stopped." }),
   onRunLog: () => () => {},
   onRunStatus: () => () => {},
+  onVerifyLog: () => () => {},
+  onVerifyStatus: () => () => {},
 };
 
 const launcherApi = window.launcher || browserPreviewLauncher;
@@ -64,11 +72,16 @@ const launcherApi = window.launcher || browserPreviewLauncher;
 const fields = Object.fromEntries(formIds.map((id) => [id, document.getElementById(id)]));
 
 const runStatus = document.getElementById("run-status");
+const liveCountdown = document.getElementById("live-countdown");
+const startupOverlay = document.getElementById("startup-overlay");
+const startupOverlayTitle = document.getElementById("startup-overlay-title");
+const startupOverlayMessage = document.getElementById("startup-overlay-message");
 const startButton = document.getElementById("btn-start");
 const stopButton = document.getElementById("btn-stop");
 
 const openSettingsButton = document.getElementById("btn-open-settings");
 const closeSettingsButton = document.getElementById("btn-close-settings");
+const openOnboardingButton = document.getElementById("btn-open-onboarding");
 const settingsDrawer = document.getElementById("settings-drawer");
 const drawerBackdrop = document.getElementById("drawer-backdrop");
 const windowShell = document.querySelector(".window-shell");
@@ -88,13 +101,82 @@ const permCamera = document.getElementById("perm-camera");
 const permAccessibility = document.getElementById("perm-accessibility");
 const permSummaryState = document.getElementById("perm-summary-state");
 const permMessage = document.getElementById("perm-message");
+const permRuntimeInfo = document.getElementById("perm-runtime-info");
+const onboarding = document.getElementById("onboarding");
+const onbSystemStatus = document.getElementById("onb-system-status");
+const onbPortStatus = document.getElementById("onb-port-status");
+const onbFlashStatus = document.getElementById("onb-flash-status");
+const onbVerifyStatus = document.getElementById("onb-verify-status");
+const onbSerialPort = document.getElementById("onb-serial-port");
+const onbCompleteButton = document.getElementById("onb-complete");
+const onbStepSystem = document.getElementById("onb-step-system");
+const onbStepPort = document.getElementById("onb-step-port");
+const onbStepFlash = document.getElementById("onb-step-flash");
+const onbStepVerify = document.getElementById("onb-step-verify");
+const onbLogOutput = document.getElementById("onb-log-output");
+const onbClearLogs = document.getElementById("onb-clear-logs");
+const wiringModal = document.getElementById("wiring-modal");
+const onbOpenWiring = document.getElementById("onb-open-wiring");
+const wiringClose = document.getElementById("wiring-close");
 
 let saveTimer = null;
 let lineCount = 0;
+let onbLogLineCount = 0;
 let logsVisible = false;
 let cachedPermissions = null;
+let cachedRuntime = null;
 let settingsVisible = true;
 let cachedSerialPorts = [];
+let onboardingState = {
+  systemOk: false,
+  portOk: false,
+  flashOk: false,
+  verifyOk: false,
+};
+let verifyStreaming = false;
+let flashInProgress = false;
+let liveCountdownTimer = null;
+let startupOverlayTimer = null;
+let startupWarmupActive = false;
+
+function onboardingDone() {
+  return window.localStorage.getItem("hciOnboardingDone") === "1";
+}
+
+function markOnboardingDone() {
+  window.localStorage.setItem("hciOnboardingDone", "1");
+}
+
+function renderStepHighlights() {
+  onbStepSystem.classList.toggle("active", !onboardingState.systemOk && !onboardingState.portOk);
+  onbStepPort.classList.toggle("active", !onboardingState.portOk);
+  onbStepFlash.classList.toggle(
+    "active",
+    onboardingState.portOk && !onboardingState.flashOk,
+  );
+  onbStepVerify.classList.toggle(
+    "active",
+    onboardingState.portOk && onboardingState.flashOk && !onboardingState.verifyOk,
+  );
+  onbCompleteButton.disabled = !(onboardingState.portOk && onboardingState.flashOk && onboardingState.verifyOk);
+}
+
+function appendOnboardingLog(text, kind = "info") {
+  if (!onbLogOutput) {
+    return;
+  }
+  const line = document.createElement("div");
+  line.className = `onb-log-line ${kind}`;
+  line.textContent = `[${kind}] ${text}`;
+  onbLogOutput.appendChild(line);
+  onbLogLineCount += 1;
+  const maxLines = 1200;
+  while (onbLogLineCount > maxLines && onbLogOutput.firstChild) {
+    onbLogOutput.removeChild(onbLogOutput.firstChild);
+    onbLogLineCount -= 1;
+  }
+  onbLogOutput.scrollTop = onbLogOutput.scrollHeight;
+}
 
 function isCheckedInput(id) {
   return [
@@ -103,6 +185,7 @@ function isCheckedInput(id) {
     "hideLandmarks",
     "enableDictationHold",
     "disableContextRouting",
+    "desktopUpEnter",
   ].includes(id);
 }
 
@@ -150,10 +233,33 @@ function renderSerialPortOptions(ports, selectedValue = "") {
   }
 }
 
+function renderOnboardingSerialOptions(ports, selectedValue = "") {
+  if (!onbSerialPort) {
+    return;
+  }
+  const uniquePorts = [...new Set((ports || []).map((p) => String(p).trim()).filter(Boolean))];
+  onbSerialPort.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = uniquePorts.length > 0 ? "Select a serial port" : "No serial ports found";
+  onbSerialPort.appendChild(placeholder);
+  for (const port of uniquePorts) {
+    const option = document.createElement("option");
+    option.value = port;
+    option.textContent = port;
+    onbSerialPort.appendChild(option);
+  }
+  if (selectedValue && uniquePorts.includes(selectedValue)) {
+    onbSerialPort.value = selectedValue;
+  }
+}
+
 async function refreshSerialPorts() {
   const selectedBefore = String(fields.serialPort?.value || "");
   try {
     const runtime = await launcherApi.getRuntime();
+    cachedRuntime = runtime || null;
+    renderRuntimeInfo();
     const detected = runtime?.likelySerialPorts || [];
     renderSerialPortOptions(detected, selectedBefore);
     if (selectedBefore && fields.serialPort.value !== selectedBefore) {
@@ -162,6 +268,26 @@ async function refreshSerialPorts() {
   } catch (error) {
     appendLog(`serial port refresh failed: ${error}`, "err");
   }
+  renderOnboardingSerialOptions(cachedSerialPorts, onbSerialPort.value || "");
+}
+
+function renderRuntimeInfo() {
+  if (!permRuntimeInfo || !cachedRuntime) {
+    return;
+  }
+  const hostBackend = String(cachedRuntime.selectedHostRuntime || "unknown");
+  const espBackend = String(cachedRuntime.selectedEspToolRuntime || "unknown");
+  const packaged = Boolean(cachedRuntime.isPackaged);
+  const appPath = String(cachedRuntime.appPath || "");
+  const fromDmgVolume = packaged && appPath.includes("/Volumes/");
+
+  const modeText = packaged ? "packaged" : "dev";
+  let suffix = "";
+  if (fromDmgVolume) {
+    suffix = " (running from DMG volume; install to /Applications)";
+  }
+  permRuntimeInfo.textContent = `Runtime: ${modeText} · host=${hostBackend} · esp=${espBackend}${suffix}`;
+  permRuntimeInfo.style.color = fromDmgVolume ? "#ffd7a8" : "";
 }
 
 function applyConfig(config) {
@@ -210,6 +336,65 @@ function updateStatusPill(state, extra) {
   runStatus.textContent = extra ? `${chosen.label} · ${extra}` : chosen.label;
   runStatus.style.background = chosen.bg;
   runStatus.style.borderColor = chosen.border;
+}
+
+function clearLiveCountdownTimer() {
+  if (liveCountdownTimer) {
+    clearTimeout(liveCountdownTimer);
+    liveCountdownTimer = null;
+  }
+}
+
+function clearStartupOverlayTimer() {
+  if (startupOverlayTimer) {
+    clearTimeout(startupOverlayTimer);
+    startupOverlayTimer = null;
+  }
+}
+
+function setStartupOverlay(visible, title = "", message = "", autoHideMs = 0) {
+  if (!startupOverlay || !startupOverlayTitle || !startupOverlayMessage) {
+    return;
+  }
+  clearStartupOverlayTimer();
+  startupOverlay.hidden = !visible;
+  if (visible) {
+    if (title) {
+      startupOverlayTitle.textContent = title;
+    }
+    if (message) {
+      startupOverlayMessage.textContent = message;
+    }
+    if (autoHideMs > 0) {
+      startupOverlayTimer = setTimeout(() => {
+        startupOverlay.hidden = true;
+        startupOverlayTimer = null;
+      }, autoHideMs);
+    }
+  }
+}
+
+function setLiveCountdownMessage(message, { autoHideMs = 0 } = {}) {
+  if (!liveCountdown) {
+    return;
+  }
+  clearLiveCountdownTimer();
+  if (!message) {
+    liveCountdown.textContent = "";
+    liveCountdown.hidden = true;
+    return;
+  }
+  liveCountdown.textContent = message;
+  liveCountdown.hidden = false;
+  if (autoHideMs > 0) {
+    liveCountdownTimer = setTimeout(() => {
+      if (liveCountdown) {
+        liveCountdown.textContent = "";
+        liveCountdown.hidden = true;
+      }
+      liveCountdownTimer = null;
+    }, autoHideMs);
+  }
 }
 
 function appendLog(text, kind) {
@@ -288,20 +473,189 @@ async function refreshPermissions() {
     renderPermissionBadge(permCamera, status.camera);
     renderPermissionBadge(permAccessibility, status.accessibility);
     renderPermissionSummary(status);
+    const source =
+      status.accessibilitySource && status.accessibilitySource !== "unknown"
+        ? ` (${status.accessibilitySource})`
+        : "";
     setPermissionMessage(
-      `Camera: ${String(status.camera || "unknown")} · Accessibility: ${String(status.accessibility || "unknown")}`,
+      `Camera: ${String(status.camera || "unknown")} · Accessibility: ${String(status.accessibility || "unknown")}${source}`,
       "info",
     );
+    if (status.accessibilityDetail) {
+      appendLog(`accessibility probe detail: ${status.accessibilityDetail}`, "warn");
+    }
   } catch (error) {
     appendLog(`permission check failed: ${error}`, "err");
     setPermissionMessage(`Permission check failed: ${error}`, "error");
   }
 }
 
+async function refreshOnboardingSystemCheck() {
+  try {
+    const status = await launcherApi.getPermissions();
+    const cameraValid = permissionLooksValid(status.camera);
+    const accessibilityValid = permissionLooksValid(status.accessibility);
+    onboardingState.systemOk = cameraValid && accessibilityValid;
+    if (onboardingState.systemOk) {
+      onbSystemStatus.textContent = "System check passed (recommended for CV/hybrid).";
+      appendOnboardingLog("System check passed (camera + accessibility).", "ok");
+    } else {
+      onbSystemStatus.textContent = `Camera: ${status.camera}, Accessibility: ${status.accessibility}`;
+      appendOnboardingLog(
+        `System check pending (non-blocking for ESP setup): camera=${status.camera}, accessibility=${status.accessibility}`,
+        "warn",
+      );
+    }
+    renderStepHighlights();
+  } catch (error) {
+    onbSystemStatus.textContent = `System check failed: ${error}`;
+    onboardingState.systemOk = false;
+    appendOnboardingLog(`System check failed: ${error}`, "err");
+    renderStepHighlights();
+  }
+}
+
+function refreshOnboardingPortState() {
+  onboardingState.portOk = Boolean(onbSerialPort.value);
+  if (onboardingState.portOk) {
+    onbPortStatus.textContent = `Selected: ${onbSerialPort.value}`;
+  } else {
+    onbPortStatus.textContent = "Select a serial port.";
+  }
+  if (!onboardingState.portOk) {
+    onboardingState.flashOk = false;
+    onboardingState.verifyOk = false;
+    onbFlashStatus.textContent = "Not started.";
+    onbVerifyStatus.textContent = "Not started.";
+  }
+  renderStepHighlights();
+}
+
+async function flashOnboardingEsp() {
+  if (!onbSerialPort.value) {
+    onbFlashStatus.textContent = "Choose a serial port first.";
+    return;
+  }
+  onbFlashStatus.textContent = "Flashing ESP... this may take a minute.";
+  appendOnboardingLog(`Starting flash on ${onbSerialPort.value}...`);
+  flashInProgress = true;
+  onboardingState.flashOk = false;
+  onboardingState.verifyOk = false;
+  onbVerifyStatus.textContent = "Not started.";
+  renderStepHighlights();
+  const result = await launcherApi.flashEsp(onbSerialPort.value);
+  flashInProgress = false;
+  if (!result.ok) {
+    onbFlashStatus.textContent = `Flash failed. ${result.message}`;
+    appendOnboardingLog(result.message, "err");
+    if (result.stdout) {
+      appendOnboardingLog(result.stdout.trim(), "stdout");
+    }
+    if (result.stderr) {
+      appendOnboardingLog(result.stderr.trim(), "stderr");
+    }
+    appendLog(result.stderr || result.stdout || result.message, "err");
+    renderStepHighlights();
+    return;
+  }
+  onboardingState.flashOk = true;
+  onbFlashStatus.textContent = "Flash complete.";
+  appendOnboardingLog("Flash complete.", "ok");
+  if (result.stdout) {
+    appendOnboardingLog(result.stdout.trim(), "stdout");
+  }
+  renderStepHighlights();
+}
+
+async function verifyOnboardingEspStream() {
+  if (!onbSerialPort.value) {
+    onbVerifyStatus.textContent = "Choose a serial port first.";
+    return;
+  }
+  const onbVerifyButton = document.getElementById("onb-verify");
+  if (!verifyStreaming) {
+    onbVerifyStatus.textContent = "Starting live verify stream...";
+    appendOnboardingLog(`Starting verify stream on ${onbSerialPort.value}...`);
+    const result = await launcherApi.startVerifyEspStream(onbSerialPort.value);
+    if (!result.ok) {
+      onbVerifyStatus.textContent = result.message;
+      appendOnboardingLog(result.message, "err");
+      return;
+    }
+    verifyStreaming = true;
+    onboardingState.verifyOk = true;
+    onbVerifyStatus.textContent = "Verify stream running. Move ESP to test.";
+    if (onbVerifyButton) {
+      onbVerifyButton.textContent = "Stop";
+    }
+    renderStepHighlights();
+    return;
+  }
+  const stopResult = await launcherApi.stopVerifyEspStream();
+  verifyStreaming = false;
+  if (onbVerifyButton) {
+    onbVerifyButton.textContent = "Verify";
+  }
+  onbVerifyStatus.textContent = stopResult.message || "Verify stream stopped.";
+  appendOnboardingLog(stopResult.message || "Verify stream stopped.", "info");
+}
+
+function completeOnboarding() {
+  Promise.allSettled([stopVerifyIfRunning(), stopFlashIfRunning()]).finally(() => {
+    fields.serialPort.value = onbSerialPort.value || fields.serialPort.value;
+    scheduleSave();
+    markOnboardingDone();
+    onboarding.hidden = true;
+  });
+}
+
+async function stopVerifyIfRunning() {
+  if (!verifyStreaming) {
+    return;
+  }
+  const onbVerifyButton = document.getElementById("onb-verify");
+  const result = await launcherApi.stopVerifyEspStream();
+  verifyStreaming = false;
+  if (onbVerifyButton) {
+    onbVerifyButton.textContent = "Verify";
+  }
+  onbVerifyStatus.textContent = result.message || "Verify stream stopped.";
+  appendOnboardingLog(result.message || "Verify stream stopped.", "info");
+}
+
+async function stopFlashIfRunning() {
+  if (!flashInProgress) {
+    return;
+  }
+  const result = await launcherApi.stopFlashEsp();
+  onbFlashStatus.textContent = result.message || "Flash stop requested.";
+  appendOnboardingLog(result.message || "Flash stop requested.", "info");
+  flashInProgress = false;
+}
+
+function resetOnboardingSessionUi() {
+  const onbVerifyButton = document.getElementById("onb-verify");
+  if (onbVerifyButton) {
+    onbVerifyButton.textContent = "Verify";
+  }
+  if (onbLogOutput) {
+    onbLogOutput.innerHTML = "";
+    onbLogLineCount = 0;
+  }
+  onboardingState.flashOk = false;
+  onboardingState.verifyOk = false;
+  onbFlashStatus.textContent = "Not started.";
+  onbVerifyStatus.textContent = "Not started.";
+  renderStepHighlights();
+}
+
 function setLogsVisible(visible) {
   logsVisible = visible;
   logPanel.hidden = !visible;
   toggleLogsButton.textContent = visible ? "Hide logs" : "Show logs";
+  if (visible && startupWarmupActive) {
+    setStartupOverlay(false);
+  }
 }
 
 function setDrawerOpen(open) {
@@ -318,6 +672,13 @@ function setDrawerOpen(open) {
     settingsDrawer.setAttribute("aria-hidden", "true");
     drawerBackdrop.hidden = true;
   }
+}
+
+function setWiringModalOpen(open) {
+  if (!wiringModal) {
+    return;
+  }
+  wiringModal.hidden = !open;
 }
 
 function scheduleSave() {
@@ -349,6 +710,14 @@ async function startRun() {
     appendLog(`started pid=${result.pid}`, "sys");
     updateStatusPill("running", `PID ${result.pid}`);
     stopButton.disabled = false;
+    startupWarmupActive = true;
+    if (!logsVisible) {
+      setStartupOverlay(
+        true,
+        "Preparing Runtime",
+        "Starting touchless runtime. First launch may take a few seconds. Open logs to monitor progress.",
+      );
+    }
   } catch (error) {
     appendLog(`start error: ${error}`, "err");
     updateStatusPill("error");
@@ -379,12 +748,26 @@ function bindEvents() {
     const eventName = isCheckedInput(id) ? "change" : "input";
     el.addEventListener(eventName, scheduleSave);
   }
+  if (fields.live) {
+    fields.live.addEventListener("change", () => {
+      if (!fields.live.checked) {
+        setLiveCountdownMessage("");
+      }
+    });
+  }
 
   startButton.addEventListener("click", startRun);
   stopButton.addEventListener("click", stopRun);
 
   openSettingsButton.addEventListener("click", () => setDrawerOpen(!settingsVisible));
   closeSettingsButton.addEventListener("click", () => setDrawerOpen(false));
+  if (openOnboardingButton) {
+    openOnboardingButton.addEventListener("click", async () => {
+      resetOnboardingSessionUi();
+      onboarding.hidden = false;
+      await refreshOnboardingSystemCheck();
+    });
+  }
   drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
 
   toggleLogsButton.addEventListener("click", () => setLogsVisible(!logsVisible));
@@ -406,6 +789,67 @@ function bindEvents() {
       scheduleSave();
     });
   }
+  const onbRefreshPorts = document.getElementById("onb-refresh-ports");
+  const onbRefreshSystem = document.getElementById("onb-refresh-system");
+  const onbOpenSettings = document.getElementById("onb-open-settings");
+  const onbFlash = document.getElementById("onb-flash");
+  const onbVerify = document.getElementById("onb-verify");
+  const onbSkip = document.getElementById("onb-skip");
+
+  if (onbRefreshPorts) {
+    onbRefreshPorts.addEventListener("click", async () => {
+      await refreshSerialPorts();
+      refreshOnboardingPortState();
+    });
+  }
+  if (onbSerialPort) {
+    onbSerialPort.addEventListener("change", refreshOnboardingPortState);
+  }
+  if (onbRefreshSystem) {
+    onbRefreshSystem.addEventListener("click", refreshOnboardingSystemCheck);
+  }
+  if (onbOpenWiring) {
+    onbOpenWiring.addEventListener("click", () => setWiringModalOpen(true));
+  }
+  if (wiringClose) {
+    wiringClose.addEventListener("click", () => setWiringModalOpen(false));
+  }
+  if (wiringModal) {
+    wiringModal.addEventListener("click", (event) => {
+      if (event.target === wiringModal) {
+        setWiringModalOpen(false);
+      }
+    });
+  }
+  if (onbOpenSettings) {
+    onbOpenSettings.addEventListener("click", async () => {
+      const result = await launcherApi.openPermissionSettings("privacy");
+      appendLog(result.message || "Opened settings", result.ok ? "sys" : "err");
+    });
+  }
+  if (onbFlash) {
+    onbFlash.addEventListener("click", flashOnboardingEsp);
+  }
+  if (onbVerify) {
+    onbVerify.addEventListener("click", verifyOnboardingEspStream);
+  }
+  if (onbCompleteButton) {
+    onbCompleteButton.addEventListener("click", completeOnboarding);
+  }
+  if (onbSkip) {
+    onbSkip.addEventListener("click", async () => {
+      await Promise.allSettled([stopVerifyIfRunning(), stopFlashIfRunning()]);
+      onboarding.hidden = true;
+    });
+  }
+  if (onbClearLogs) {
+    onbClearLogs.addEventListener("click", () => {
+      if (onbLogOutput) {
+        onbLogOutput.innerHTML = "";
+        onbLogLineCount = 0;
+      }
+    });
+  }
 
   refreshPermButton.addEventListener("click", refreshPermissions);
 
@@ -419,6 +863,7 @@ function bindEvents() {
         appendLog("camera permission already valid", "sys");
         setPermissionMessage("Camera already valid.", "success");
         await refreshPermissions();
+        await refreshOnboardingSystemCheck();
         return;
       }
 
@@ -434,11 +879,12 @@ function bindEvents() {
         );
         setPermissionMessage(
           openResult.ok
-            ? "Camera denied. Opened System Settings; enable camera access there."
+            ? "Camera denied. Opened System Settings; enable camera access, then restart Touchless Launcher."
             : `Could not open settings: ${openResult.message}`,
           openResult.ok ? "info" : "error",
         );
         await refreshPermissions();
+        await refreshOnboardingSystemCheck();
         return;
       }
 
@@ -450,7 +896,7 @@ function bindEvents() {
         const openResult = await launcherApi.openPermissionSettings("camera");
         setPermissionMessage(
           openResult.ok
-            ? "Camera not granted. Opened System Settings for manual enable."
+            ? "Camera not granted. Opened System Settings for manual enable. Restart app after enabling."
             : "Camera not granted. Please open System Settings > Privacy > Camera.",
           "error",
         );
@@ -458,6 +904,7 @@ function bindEvents() {
         setPermissionMessage(`Camera request failed: ${result.message || "unknown error"}`, "error");
       }
       await refreshPermissions();
+      await refreshOnboardingSystemCheck();
     } catch (error) {
       appendLog(`camera request crashed: ${error}`, "err");
       setPermissionMessage(`Camera request failed: ${error}`, "error");
@@ -474,9 +921,13 @@ function bindEvents() {
       if (result.ok && result.trusted) {
         setPermissionMessage("Accessibility permission granted.", "success");
       } else {
-        setPermissionMessage("Accessibility not granted yet. Approve in System Settings.", "error");
+        setPermissionMessage(
+          "Accessibility not granted yet. Enable Touchless Launcher in System Settings.",
+          "error",
+        );
       }
       await refreshPermissions();
+      await refreshOnboardingSystemCheck();
     } catch (error) {
       setPermissionMessage(`Accessibility request failed: ${error}`, "error");
     }
@@ -494,13 +945,53 @@ function bindEvents() {
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      setWiringModalOpen(false);
       setDrawerOpen(false);
     }
   });
 
   launcherApi.onRunLog((entry) => {
+    const text = String(entry.text || "");
+    const trimmed = text.trim();
+    if (trimmed.startsWith("cv_event type=move ")) {
+      // Skip high-frequency cursor telemetry to keep logs readable.
+      return;
+    }
     const kind = entry.stream === "stderr" ? "err" : "out";
     appendLog(entry.text, kind);
+    if (trimmed.includes("Matplotlib is building the font cache")) {
+      startupWarmupActive = true;
+      if (!logsVisible) {
+        setStartupOverlay(
+          true,
+          "Preparing Runtime",
+          "Building font cache for first-time startup. This usually happens once. Check logs for progress.",
+        );
+      }
+      return;
+    }
+    if (
+      trimmed.startsWith("[cv] ready") ||
+      trimmed.startsWith("type=gesture") ||
+      trimmed.startsWith("[live] live execution active")
+    ) {
+      if (startupWarmupActive) {
+        startupWarmupActive = false;
+        setStartupOverlay(false);
+      }
+    }
+    if (trimmed.startsWith("[live] LIVE MODE ENABLED")) {
+      setLiveCountdownMessage("Live actions armed. Starting countdown…");
+      return;
+    }
+    const match = trimmed.match(/^\[live\] starting in (\d+)\.\.\.$/);
+    if (match) {
+      setLiveCountdownMessage(`Live actions start in ${match[1]}…`);
+      return;
+    }
+    if (trimmed.startsWith("[live] live execution active")) {
+      setLiveCountdownMessage("Live actions active.", { autoHideMs: 2000 });
+    }
   });
 
   launcherApi.onRunStatus((status) => {
@@ -510,10 +1001,15 @@ function bindEvents() {
       stopButton.disabled = false;
     } else if (status.state === "stopping") {
       updateStatusPill("stopping");
+      startupWarmupActive = false;
+      setStartupOverlay(false);
     } else if (status.state === "stopped") {
       updateStatusPill("stopped", `code ${status.code ?? "?"}`);
       startButton.disabled = false;
       stopButton.disabled = true;
+      setLiveCountdownMessage("");
+      startupWarmupActive = false;
+      setStartupOverlay(false);
       appendLog(
         `run exited code=${status.code ?? "?"} signal=${status.signal || "none"}`,
         "sys",
@@ -522,9 +1018,47 @@ function bindEvents() {
       updateStatusPill("error");
       startButton.disabled = false;
       stopButton.disabled = true;
+      setLiveCountdownMessage("");
+      startupWarmupActive = false;
+      setStartupOverlay(false);
       appendLog(status.message || "runtime error", "err");
     }
   });
+
+  if (launcherApi.onVerifyLog) {
+    launcherApi.onVerifyLog((entry) => {
+      if (!entry || !entry.text) {
+        return;
+      }
+      const text = String(entry.text);
+      if (text === "__VERIFY_READY__") {
+        appendOnboardingLog("Verify stream connected.", "ok");
+        return;
+      }
+      appendOnboardingLog(text, entry.stream === "stderr" ? "stderr" : "stdout");
+    });
+  }
+
+  if (launcherApi.onVerifyStatus) {
+    launcherApi.onVerifyStatus((status) => {
+      const onbVerifyButton = document.getElementById("onb-verify");
+      if (status.state === "running") {
+        verifyStreaming = true;
+        onboardingState.verifyOk = true;
+        onbVerifyStatus.textContent = `Verify stream running on ${status.port}.`;
+        if (onbVerifyButton) {
+          onbVerifyButton.textContent = "Stop";
+        }
+      } else if (status.state === "stopped") {
+        verifyStreaming = false;
+        onbVerifyStatus.textContent = "Verify stream stopped.";
+        if (onbVerifyButton) {
+          onbVerifyButton.textContent = "Verify";
+        }
+      }
+      renderStepHighlights();
+    });
+  }
 }
 
 async function bootstrap() {
@@ -538,7 +1072,15 @@ async function bootstrap() {
   await refreshSerialPorts();
   const config = await launcherApi.getConfig();
   applyConfig(config);
+  renderRuntimeInfo();
   await refreshPermissions();
+  onboarding.hidden = onboardingDone();
+  appendOnboardingLog("Quick Setup ready.");
+  renderOnboardingSerialOptions(cachedSerialPorts, fields.serialPort.value || "");
+  onbSerialPort.value = fields.serialPort.value || "";
+  refreshOnboardingPortState();
+  await refreshOnboardingSystemCheck();
+  renderStepHighlights();
 }
 
 bootstrap().catch((error) => {

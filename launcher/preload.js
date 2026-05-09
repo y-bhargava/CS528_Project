@@ -25,7 +25,13 @@ contextBridge.exposeInMainWorld("launcher", {
   promptAccessibilityPermission: () => ipcRenderer.invoke("launcher:prompt-accessibility"),
   openPermissionSettings: (kind) =>
     ipcRenderer.invoke("launcher:open-permission-settings", kind),
+  flashEsp: (serialPort) => ipcRenderer.invoke("launcher:flash-esp", serialPort),
+  stopFlashEsp: () => ipcRenderer.invoke("launcher:stop-flash-esp"),
+  startVerifyEspStream: (serialPort) => ipcRenderer.invoke("launcher:start-verify-esp-stream", serialPort),
+  stopVerifyEspStream: () => ipcRenderer.invoke("launcher:stop-verify-esp-stream"),
 
   onRunLog: (callback) => onChannel("run:log", callback),
   onRunStatus: (callback) => onChannel("run:status", callback),
+  onVerifyLog: (callback) => onChannel("onboarding:verify-log", callback),
+  onVerifyStatus: (callback) => onChannel("onboarding:verify-status", callback),
 });

@@ -7,6 +7,93 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <section id="onboarding" class="onboarding" hidden>
+      <div class="onboarding-card">
+        <div class="onboarding-layout">
+          <div>
+            <h2>Quick Setup</h2>
+            <p>Finish setup once, then launch touchless control.</p>
+            <ol class="onboarding-steps">
+              <li id="onb-step-system" class="onb-step active">
+                <div>
+                  <strong>System Check</strong>
+                  <small>Recommended for CV/Hybrid (ESP flash does not require camera)</small>
+                </div>
+                <div class="onb-actions">
+                  <button id="onb-refresh-system" class="btn btn-mini" type="button">Check</button>
+                  <button id="onb-open-settings" class="btn btn-mini" type="button">Open Settings</button>
+                </div>
+                <p id="onb-system-status" class="onb-status">Not checked.</p>
+              </li>
+              <li id="onb-step-port" class="onb-step">
+                <div class="onb-step-head">
+                  <strong>Connect ESP</strong>
+                  <div class="onb-step-head-right">
+                    <small>Detect and select serial port</small>
+                    <button id="onb-open-wiring" class="btn btn-mini" type="button">Wiring Guide</button>
+                  </div>
+                </div>
+                <div class="onb-actions">
+                  <select id="onb-serial-port" aria-label="Onboarding Serial Port">
+                    <option value="">Select a serial port</option>
+                  </select>
+                  <button id="onb-refresh-ports" class="btn btn-mini" type="button">Refresh</button>
+                </div>
+                <p id="onb-port-status" class="onb-status">Waiting for device.</p>
+              </li>
+              <li id="onb-step-flash" class="onb-step">
+                <div>
+                  <strong>Flash Firmware</strong>
+                  <small>Program ESP from this app</small>
+                </div>
+                <div class="onb-actions">
+                  <button id="onb-flash" class="btn btn-mini" type="button">Flash ESP</button>
+                </div>
+                <p id="onb-flash-status" class="onb-status">Not started.</p>
+              </li>
+              <li id="onb-step-verify" class="onb-step">
+                <div>
+                  <strong>Verify Stream</strong>
+                  <small>Confirm gesture NDJSON is coming in</small>
+                </div>
+                <div class="onb-actions">
+                  <button id="onb-verify" class="btn btn-mini" type="button">Verify</button>
+                </div>
+                <p id="onb-verify-status" class="onb-status">Not started.</p>
+              </li>
+            </ol>
+            <div class="onb-footer">
+              <button id="onb-skip" class="btn btn-ghost" type="button">Skip For Now</button>
+              <button id="onb-complete" class="btn btn-primary" type="button" disabled>Continue</button>
+            </div>
+          </div>
+          <aside class="onb-log-card">
+            <div class="onb-log-head">
+              <strong>Setup Logs</strong>
+              <button id="onb-clear-logs" class="btn btn-mini" type="button">Clear</button>
+            </div>
+            <div id="onb-log-output" class="onb-log-output"></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="wiring-modal" class="wiring-modal" hidden>
+      <div class="wiring-card">
+        <div class="wiring-head">
+          <h3>ESP Wiring Guide</h3>
+          <button id="wiring-close" class="btn btn-icon" type="button" aria-label="Close wiring guide">✕</button>
+        </div>
+        <p class="wiring-sub">ESP32-S3 DevKitC + MPU6050</p>
+        <div class="wiring-grid">
+          <div class="wiring-row"><strong>SDA</strong><code>GPIO8</code></div>
+          <div class="wiring-row"><strong>SCL</strong><code>GPIO9</code></div>
+          <div class="wiring-row"><strong>VCC</strong><code>3V3</code></div>
+          <div class="wiring-row"><strong>GND</strong><code>GND</code></div>
+        </div>
+      </div>
+    </section>
+
     <main class="app-shell">
       <section class="window-shell">
         <header class="topbar">
@@ -24,6 +111,12 @@
 
         <div class="workspace">
           <section class="control-area">
+            <div id="startup-overlay" class="startup-overlay" hidden aria-live="polite">
+              <div class="startup-overlay-card">
+                <strong id="startup-overlay-title">Preparing Runtime</strong>
+                <p id="startup-overlay-message">Starting touchless runtime…</p>
+              </div>
+            </div>
             <article class="main-card">
               <div class="hero-emblem" aria-hidden="true">☝</div>
               <h2>Touchless Control</h2>
@@ -47,6 +140,7 @@
                   </span>
                   <input id="live" type="checkbox" />
                 </label>
+                <p id="live-countdown" class="live-countdown" hidden aria-live="polite"></p>
               </form>
             </article>
 
@@ -67,7 +161,10 @@
           <aside id="settings-drawer" class="settings-drawer" aria-hidden="false">
             <div class="drawer-head">
               <h2>Settings</h2>
-              <button id="btn-close-settings" class="btn btn-icon" type="button" aria-label="Close settings">✕</button>
+              <div class="drawer-head-actions">
+                <button id="btn-open-onboarding" class="btn btn-mini" type="button">Quick Setup</button>
+                <button id="btn-close-settings" class="btn btn-icon" type="button" aria-label="Close settings">✕</button>
+              </div>
             </div>
 
             <form class="drawer-form">
@@ -107,6 +204,7 @@
                     <button id="btn-open-perm-settings" class="btn btn-mini" type="button">Open Settings</button>
                   </div>
                   <p id="perm-message" class="perm-message" aria-live="polite">Permission status not checked yet.</p>
+                  <p id="perm-runtime-info" class="perm-message">Runtime backend not checked yet.</p>
                 </div>
               </details>
 
@@ -208,6 +306,11 @@
                   <label class="toggle-row">
                     <span>Disable Context Routing</span>
                     <input id="disableContextRouting" type="checkbox" />
+                  </label>
+
+                  <label class="toggle-row">
+                    <span>Desktop Up Sends Enter</span>
+                    <input id="desktopUpEnter" type="checkbox" />
                   </label>
                 </div>
               </details>

@@ -59,9 +59,14 @@ PROFILE_MAPPINGS: dict[str, dict[str, str]] = {
         "left": "SWITCH_SPACE_LEFT",
         "right": "SWITCH_SPACE_RIGHT",
         "up": "MISSION_CONTROL",
-        "down": "SHOW_DESKTOP",
+        "down": "TRIGGER_SEARCH",
     },
 }
+
+
+def configure_desktop_up_action(use_enter: bool) -> None:
+    """Set desktop/global 'up' mapping to Enter or Mission Control."""
+    PROFILE_MAPPINGS["desktop"]["up"] = "PRESS_ENTER" if use_enter else "MISSION_CONTROL"
 
 
 @dataclass(frozen=True)

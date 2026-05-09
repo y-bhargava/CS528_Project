@@ -3,6 +3,7 @@
 
 import argparse
 import math
+import os
 import signal
 import sys
 import threading
@@ -188,11 +189,32 @@ def _is_thumbs_up_pose(
     return thumb_up and index_down and middle_down and ring_down and pinky_down
 
 
+def _select_preferred_hand(result, preferred_label: str = "Right"):
+    """Return hand landmarks for the preferred handedness, or None."""
+    hands = getattr(result, "multi_hand_landmarks", None)
+    handedness = getattr(result, "multi_handedness", None)
+    if not hands:
+        return None
+    if not handedness or len(handedness) != len(hands):
+        return hands[0]
+
+    preferred = preferred_label.strip().lower()
+    for hand, hand_info in zip(hands, handedness):
+        try:
+            label = hand_info.classification[0].label
+        except Exception:
+            continue
+        if str(label).strip().lower() == preferred:
+            return hand
+    return None
+
+
 def run_cv_cursor(
     config: CVCursorConfig,
     stop_event: threading.Event | None = None,
 ) -> int:
     smooth = _clamp(config.smooth, 0.01, 1.0)
+    external_executor = os.environ.get("TOUCHLESS_EXTERNAL_EXECUTOR", "0") == "1"
     pinch_threshold = max(0.005, config.pinch_threshold)
     drag_hold_seconds = max(0.05, config.drag_hold_ms / 1000.0)
     click_move_threshold = max(2.0, float(config.click_move_threshold))
@@ -226,6 +248,7 @@ def run_cv_cursor(
     was_scrolling = False
     last_scroll_ty: float | None = None
     last_print = 0.0
+    last_external_move_emit = 0.0
     fist_started_at: float | None = None
     mode_hold_seconds = max(0.25, config.mode_toggle_hold_ms / 1000.0)
     scroll_step_pixels = max(4.0, float(config.scroll_step_pixels))
@@ -260,8 +283,8 @@ def run_cv_cursor(
             ui_state = "NO_HAND"
             cv_drag_mode = True
 
-            if result.multi_hand_landmarks:
-                hand = result.multi_hand_landmarks[0]
+            hand = _select_preferred_hand(result, preferred_label="Right")
+            if hand is not None:
                 lm = hand.landmark
 
                 ix = lm[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
@@ -345,7 +368,10 @@ def run_cv_cursor(
                         if config.dry_run:
                             print("[cv] dictation keyDown fn", flush=True)
                         else:
-                            pyautogui.keyDown("fn")
+                            if external_executor:
+                                print("cv_event type=dictationDown", flush=True)
+                            else:
+                                pyautogui.keyDown("fn")
                         dictation_key_held = True
                 else:
                     dictation_pose_started_at = None
@@ -353,7 +379,10 @@ def run_cv_cursor(
                         if config.dry_run:
                             print("[cv] dictation keyUp fn", flush=True)
                         else:
-                            pyautogui.keyUp("fn")
+                            if external_executor:
+                                print("cv_event type=dictationUp", flush=True)
+                            else:
+                                pyautogui.keyUp("fn")
                         dictation_key_held = False
 
                 if is_pinching and not was_pinching:
@@ -370,14 +399,21 @@ def run_cv_cursor(
                             if config.dry_run:
                                 print("[cv] dragDown", flush=True)
                             else:
-                                pyautogui.mouseDown()
+                                if external_executor:
+                                    print("cv_event type=dragDown", flush=True)
+                                else:
+                                    pyautogui.mouseDown()
                             is_dragging = True
 
                 # Keep cursor moving during pinch so drag destination remains visible.
                 cursor_x = _lerp(cursor_x, tx, smooth)
                 cursor_y = _lerp(cursor_y, ty, smooth)
 
-                if config.dry_run:
+                if external_executor and not config.dry_run:
+                    if now - last_external_move_emit > 0.03:
+                        print(f"cv_event type=move x={int(cursor_x)} y={int(cursor_y)}", flush=True)
+                        last_external_move_emit = now
+                elif config.dry_run:
                     if now - last_print > 0.2:
                         print(f"[cv] cursor x={int(cursor_x)} y={int(cursor_y)}", flush=True)
                         last_print = now
@@ -395,7 +431,10 @@ def run_cv_cursor(
                         if config.dry_run:
                             print(f"[cv] scroll steps={steps}", flush=True)
                         else:
-                            pyautogui.scroll(steps)
+                            if external_executor:
+                                print(f"cv_event type=scroll steps={steps}", flush=True)
+                            else:
+                                pyautogui.scroll(steps)
                         # Preserve fractional remainder by resetting relative to consumed steps.
                         last_scroll_ty = ty + (dy - (steps * scroll_step_pixels))
                     else:
@@ -411,13 +450,19 @@ def run_cv_cursor(
                         if config.dry_run:
                             print("[cv] dragUp", flush=True)
                         else:
-                            pyautogui.mouseUp()
+                            if external_executor:
+                                print("cv_event type=dragUp", flush=True)
+                            else:
+                                pyautogui.mouseUp()
                         is_dragging = False
                     elif held < drag_hold_seconds and pinch_travel <= click_move_threshold and not was_scrolling:
                         if config.dry_run:
                             print("[cv] click", flush=True)
                         else:
-                            pyautogui.click()
+                            if external_executor:
+                                print("cv_event type=click", flush=True)
+                            else:
+                                pyautogui.click()
                     elif held < drag_hold_seconds and config.dry_run:
                         print("[cv] click canceled (movement)", flush=True)
                     pinch_started_at = None
@@ -447,7 +492,10 @@ def run_cv_cursor(
                     if config.dry_run:
                         print("[cv] lost hand -> dragUp", flush=True)
                     else:
-                        pyautogui.mouseUp()
+                        if external_executor:
+                            print("cv_event type=dragUp", flush=True)
+                        else:
+                            pyautogui.mouseUp()
                     is_dragging = False
                 was_pinching = False
                 pinch_started_at = None
@@ -462,7 +510,10 @@ def run_cv_cursor(
                     if config.dry_run:
                         print("[cv] dictation keyUp fn (lost hand)", flush=True)
                     else:
-                        pyautogui.keyUp("fn")
+                        if external_executor:
+                            print("cv_event type=dictationUp", flush=True)
+                        else:
+                            pyautogui.keyUp("fn")
                     dictation_key_held = False
                 if config.mode_state is not None:
                     try:
@@ -541,9 +592,15 @@ def run_cv_cursor(
         pass
     finally:
         if dictation_key_held and not config.dry_run:
-            pyautogui.keyUp("fn")
+            if external_executor:
+                print("cv_event type=dictationUp", flush=True)
+            else:
+                pyautogui.keyUp("fn")
         if is_dragging and not config.dry_run:
-            pyautogui.mouseUp()
+            if external_executor:
+                print("cv_event type=dragUp", flush=True)
+            else:
+                pyautogui.mouseUp()
         app_monitor.stop()
         cap.release()
         hands.close()

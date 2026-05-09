@@ -2,10 +2,49 @@
   "name": "touchless-hci-launcher",
   "version": "0.1.0",
   "private": true,
+  "author": "CS528 Touchless Team",
   "description": "Desktop launcher for the Touchless HCI host runtime",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "prepare:resources": "bash scripts/prepare_release.sh",
+    "build:dir": "npm run prepare:resources && npx electron-builder --dir",
+    "build:dmg": "npm run prepare:resources && npx electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.touchless.launcher",
+    "productName": "Touchless Launcher",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/firmware",
+        "to": "firmware",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Touchless Launcher needs camera access for hand tracking controls.",
+        "NSMicrophoneUsageDescription": "Touchless Launcher can use microphone access for optional voice workflows."
+      },
+      "icon": "assets/icons/app-icon-transparent.png"
+    }
   },
   "devDependencies": {
     "electron": "^31.7.7"
