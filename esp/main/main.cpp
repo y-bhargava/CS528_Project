@@ -10,7 +10,7 @@ extern "C" {
     #include "mpu6050.h"
 }
 
-#include "svm_model.h"   // contains classifier + scale_features()
+#include "svm_model.h"
 
 #define I2C_MASTER_SCL_IO    GPIO_NUM_9
 #define I2C_MASTER_SDA_IO    GPIO_NUM_8
@@ -18,18 +18,27 @@ extern "C" {
 #define I2C_MASTER_NUM       I2C_NUM_0
 
 #define SAMPLE_PERIOD_MS        10
-#define CAPTURE_SIZE            100   // 1 second at 10 ms/sample
+#define CAPTURE_SIZE            100
 #define GYRO_TRIGGER_THRESHOLD  50.0f
+#define PRE_TRIGGER_SAMPLES     35
+#define POST_TRIGGER_SAMPLES    (CAPTURE_SIZE - PRE_TRIGGER_SAMPLES)
 
 static mpu6050_handle_t mpu6050 = NULL;
 Eloquent::ML::Port::LDA classifier;
 const char* gesture_names[] = {"left", "right", "up", "down", "twist"};
 
-float ring_ax[CAPTURE_SIZE], ring_ay[CAPTURE_SIZE], ring_az[CAPTURE_SIZE];
-float ring_gx[CAPTURE_SIZE], ring_gy[CAPTURE_SIZE], ring_gz[CAPTURE_SIZE];
-float cap_ax[CAPTURE_SIZE],  cap_ay[CAPTURE_SIZE],  cap_az[CAPTURE_SIZE];
-float cap_gx[CAPTURE_SIZE],  cap_gy[CAPTURE_SIZE],  cap_gz[CAPTURE_SIZE];
+// Capture buffer (fed to feature extractor)
+float cap_ax[CAPTURE_SIZE], cap_ay[CAPTURE_SIZE], cap_az[CAPTURE_SIZE];
+float cap_gx[CAPTURE_SIZE], cap_gy[CAPTURE_SIZE], cap_gz[CAPTURE_SIZE];
 
+// Pre-trigger ring buffer (~150 ms of history)
+float pre_ax[PRE_TRIGGER_SAMPLES], pre_ay[PRE_TRIGGER_SAMPLES], pre_az[PRE_TRIGGER_SAMPLES];
+float pre_gx[PRE_TRIGGER_SAMPLES], pre_gy[PRE_TRIGGER_SAMPLES], pre_gz[PRE_TRIGGER_SAMPLES];
+int   pre_head = 0;
+
+// ---------------------------------------------------------------------------
+// I2C init
+// ---------------------------------------------------------------------------
 static esp_err_t i2c_bus_init(void) {
     i2c_config_t conf = {};
     conf.mode             = I2C_MODE_MASTER;
@@ -43,8 +52,7 @@ static esp_err_t i2c_bus_init(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Feature extraction — 18 features matching train_svm.py:
-//   max[6], min[6], std[6]
+// Feature extraction — 18 features: max[6], min[6], std[6]
 // ---------------------------------------------------------------------------
 void extract_features(float* features) {
     float* axes[6] = {cap_ax, cap_ay, cap_az, cap_gx, cap_gy, cap_gz};
@@ -63,46 +71,24 @@ void extract_features(float* features) {
             var += d * d;
         }
         features[i]      = max_val;
-        features[6 + i]  = min_val;
+        features[6  + i] = min_val;
         features[12 + i] = sqrtf(var / CAPTURE_SIZE);
+        features[18 + i] = mean;   // ← add this
     }
 }
 
 // ---------------------------------------------------------------------------
-// Shared: unroll ring buffer → cap arrays, extract, scale, predict, emit
-// ---------------------------------------------------------------------------
-void run_prediction(int head) {
-    for (int i = 0; i < CAPTURE_SIZE; i++) {
-        int idx = (head + i) % CAPTURE_SIZE;
-        cap_ax[i] = ring_ax[idx]; cap_ay[i] = ring_ay[idx]; cap_az[i] = ring_az[idx];
-        cap_gx[i] = ring_gx[idx]; cap_gy[i] = ring_gy[idx]; cap_gz[i] = ring_gz[idx];
-    }
-
-    float features[18];
-    extract_features(features);
-    scale_features(features);   // apply StandardScaler before classifier
-
-    int class_idx = classifier.predict(features);
-    printf("{\"type\":\"gesture\",\"name\":\"%s\",\"source\":\"lda\"}\n",
-           gesture_names[class_idx]);
-}
-
-// ---------------------------------------------------------------------------
-// Gesture task — autonomous detection for main.py
+// Gesture task
 // ---------------------------------------------------------------------------
 void gesture_task(void *pvParameters) {
     mpu6050_acce_value_t acce;
     mpu6050_gyro_value_t gyro;
-    int  head             = 0;
-    int  samples          = 0;
-    bool cooldown_active  = false;
+    bool in_cooldown = false;
 
     while (1) {
-        // Check for 't' command from predict.py (non-blocking)
+        // --- 't' command: stream raw CSV for predict.py ---
         uint8_t ch = 0;
-        int len = uart_read_bytes(UART_NUM_0, &ch, 1, 0);
-        if (len > 0 && ch == 't') {
-            // Capture exactly 100 samples on demand, output as CSV for predict.py
+        if (uart_read_bytes(UART_NUM_0, &ch, 1, 0) > 0 && ch == 't') {
             printf("---START---\n");
             printf("ax,ay,az,gx,gy,gz\n");
             for (int i = 0; i < CAPTURE_SIZE; i++) {
@@ -114,46 +100,65 @@ void gesture_task(void *pvParameters) {
                 vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
             }
             printf("---END---\n");
-            samples = 0;
-            head    = 0;
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
+        // --- Poll IMU ---
         mpu6050_get_acce(mpu6050, &acce);
         mpu6050_get_gyro(mpu6050, &gyro);
-
-        ring_ax[head] = acce.acce_x; ring_ay[head] = acce.acce_y; ring_az[head] = acce.acce_z;
-        ring_gx[head] = gyro.gyro_x; ring_gy[head] = gyro.gyro_y; ring_gz[head] = gyro.gyro_z;
-        head = (head + 1) % CAPTURE_SIZE;
-        if (samples < CAPTURE_SIZE) samples++;
 
         bool motion = (fabsf(gyro.gyro_x) > GYRO_TRIGGER_THRESHOLD ||
                        fabsf(gyro.gyro_y) > GYRO_TRIGGER_THRESHOLD ||
                        fabsf(gyro.gyro_z) > GYRO_TRIGGER_THRESHOLD);
 
-        if (samples == CAPTURE_SIZE && motion && !cooldown_active) {
-            // Capture 40 more samples to catch the tail of the gesture
-            for (int i = 0; i < 40; i++) {
-                vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
-                mpu6050_get_acce(mpu6050, &acce);
-                mpu6050_get_gyro(mpu6050, &gyro);
-                ring_ax[head] = acce.acce_x; ring_ay[head] = acce.acce_y; ring_az[head] = acce.acce_z;
-                ring_gx[head] = gyro.gyro_x; ring_gy[head] = gyro.gyro_y; ring_gz[head] = gyro.gyro_z;
-                head = (head + 1) % CAPTURE_SIZE;
+        if (motion && !in_cooldown) {
+            in_cooldown = true;
+
+            // 1. Unroll pre-trigger ring buffer into start of cap arrays
+            //    This gives us ~150 ms before the threshold fired, matching
+            //    the training window from Code 1 (Enter -> 150 ms -> capture)
+            for (int i = 0; i < PRE_TRIGGER_SAMPLES; i++) {
+                int idx = (pre_head + i) % PRE_TRIGGER_SAMPLES;
+                cap_ax[i] = pre_ax[idx]; cap_ay[i] = pre_ay[idx]; cap_az[i] = pre_az[idx];
+                cap_gx[i] = pre_gx[idx]; cap_gy[i] = pre_gy[idx]; cap_gz[i] = pre_gz[idx];
             }
 
-            run_prediction(head);
+            // 2. Capture remaining 85 samples forward
+            for (int i = PRE_TRIGGER_SAMPLES; i < CAPTURE_SIZE; i++) {
+                mpu6050_get_acce(mpu6050, &acce);
+                mpu6050_get_gyro(mpu6050, &gyro);
+                cap_ax[i] = acce.acce_x; cap_ay[i] = acce.acce_y; cap_az[i] = acce.acce_z;
+                cap_gx[i] = gyro.gyro_x; cap_gy[i] = gyro.gyro_y; cap_gz[i] = gyro.gyro_z;
+                vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
+            }
 
+            // 3. Extract, scale, predict
+            float features[24];
+            extract_features(features);
+            scale_features(features);
+            int class_idx = classifier.predict(features);
+            printf("{\"type\":\"gesture\",\"name\":\"%s\",\"source\":\"lda\"}\n",
+                   gesture_names[class_idx]);
+
+            // 4. Cooldown to prevent re-triggering on gesture tail
             vTaskDelay(pdMS_TO_TICKS(800));
-            samples = 0;
-            head    = 0;
+            in_cooldown = false;
+
+        } else {
+            // Keep rolling pre-trigger history while idle
+            pre_ax[pre_head] = acce.acce_x; pre_ay[pre_head] = acce.acce_y; pre_az[pre_head] = acce.acce_z;
+            pre_gx[pre_head] = gyro.gyro_x; pre_gy[pre_head] = gyro.gyro_y; pre_gz[pre_head] = gyro.gyro_z;
+            pre_head = (pre_head + 1) % PRE_TRIGGER_SAMPLES;
         }
 
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
 }
 
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 extern "C" void app_main(void) {
     ESP_ERROR_CHECK(i2c_bus_init());
     mpu6050 = mpu6050_create(I2C_MASTER_NUM, 0x68);

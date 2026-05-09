@@ -81,7 +81,7 @@ def train(model_type: str, c: float, kernel: str, gamma: str | float) -> None:
         sys.exit(1)
 
     print(f"\nTotal samples : {len(X_raw)}")
-    print(f"Feature vector: 18  (max / min / std for each of {len(AXIS_COLS)} axes)")
+    print(f"Feature vector: {len(AXIS_COLS) * 4}  (max / min / std / mean for each of {len(AXIS_COLS)} axes)")
 
     X = extract_all_features(X_raw)   # shape (N, 18)
 
@@ -110,7 +110,7 @@ def train(model_type: str, c: float, kernel: str, gamma: str | float) -> None:
                 "pipeline": pipeline,
                 "gesture_classes": GESTURE_CLASSES,
                 "axes": AXIS_COLS,
-                "feature_order": "max,min,std",
+                "feature_order": "max,min,std,mean",
                 "window_size": 100,
                 "model_type": model_type,
             },
@@ -123,7 +123,7 @@ def train(model_type: str, c: float, kernel: str, gamma: str | float) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Train gesture classifier (18 features).")
+    parser = argparse.ArgumentParser(description="Train gesture classifier (24 features).")
     parser.add_argument(
         "--model-type", default=DEFAULT_MODEL_TYPE, choices=["lda", "svm"],
         help=f"Classifier type (default: {DEFAULT_MODEL_TYPE}).",
