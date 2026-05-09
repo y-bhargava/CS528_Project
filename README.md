@@ -6,6 +6,9 @@ Touchless control system using:
 - Context-aware host routing
 - Electron launcher with onboarding, flashing, and runtime controls
 
+<img width="1674" height="1440" alt="image" src="https://github.com/user-attachments/assets/b5620402-cbf4-48ba-b8c2-d1e3202eb947" />
+
+
 ## Gesture Mapping (Read This First)
 
 The system uses **5 ESP gesture labels**:
