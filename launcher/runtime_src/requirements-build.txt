@@ -1,0 +1,7 @@
+# Runtime/build dependencies used to create bundled launcher binaries.
+pyinstaller>=6.0
+pyserial>=3.5
+esptool>=5.0
+mediapipe
+opencv-python
+pyautogui

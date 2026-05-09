@@ -2,6 +2,8 @@
 """Orchestrate host event flow: input -> parse -> route -> execute."""
 
 import argparse
+import json
+import os
 import signal
 import sys
 import threading
@@ -9,6 +11,7 @@ import time
 from typing import Iterable
 
 from app_context import get_frontmost_app_name
+from accessibility_check import is_process_trusted
 from control_mode import ModeState
 import executor
 from executor import execute_action
@@ -19,7 +22,8 @@ from input_sources import (
 )
 from message_parser import parse_ndjson_line
 from platform_util import configure_platform
-from router import route_gesture_for_context
+from platform_util import is_mac
+from router import configure_desktop_up_action, route_gesture_for_context
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -117,6 +121,31 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force global desktop profile instead of app-aware routing.",
     )
+    parser.add_argument(
+        "--disable-pause-toggle",
+        action="store_true",
+        help="Ignore TOGGLE_PAUSE gesture so pause/resume cannot be toggled by gesture.",
+    )
+    parser.add_argument(
+        "--desktop-up-enter",
+        action="store_true",
+        help="Map desktop/global UP gesture to Enter instead of Mission Control.",
+    )
+    parser.add_argument(
+        "--check-accessibility",
+        action="store_true",
+        help="Check macOS accessibility trust for this runtime process and exit.",
+    )
+    parser.add_argument(
+        "--prompt-accessibility",
+        action="store_true",
+        help="Request macOS accessibility trust prompt for this runtime process and exit.",
+    )
+    parser.add_argument(
+        "--allow-untrusted-accessibility",
+        action="store_true",
+        help="Do not hard-fail live mode when AX trust probe reports untrusted.",
+    )
     return parser
 
 
@@ -148,6 +177,7 @@ def _handle_gesture(
     line_number: int,
     mode_state: ModeState,
     disable_context_routing: bool,
+    disable_pause_toggle: bool,
 ) -> None:
     mode = mode_state.get_mode()
     active_app = None if disable_context_routing else get_frontmost_app_name()
@@ -160,6 +190,22 @@ def _handle_gesture(
         mode=mode,
     )
     if resolution.action is not None:
+        if disable_pause_toggle and resolution.action == "TOGGLE_PAUSE":
+            print(
+                " ".join(
+                    (
+                        "type=gesture",
+                        f"name={gesture_name}",
+                        f"mode={mode}",
+                        f"app={active_app or '<unknown>'}",
+                        f"profile={resolution.profile}",
+                        f"action={resolution.action}",
+                        "result=skipped_pause_disabled",
+                    )
+                ),
+                flush=True,
+            )
+            return
         if executor.IS_PAUSED and resolution.action != "TOGGLE_PAUSE":
             print(
                 " ".join(
@@ -246,6 +292,7 @@ def _run_esp_pipeline(
                         line_number=line_number,
                         mode_state=mode_state,
                         disable_context_routing=args.disable_context_routing,
+                        disable_pause_toggle=args.disable_pause_toggle,
                     )
                 else:
                     print("type=gesture name=<missing>", flush=True)
@@ -289,6 +336,20 @@ def _build_cv_config(args: argparse.Namespace, dry_run: bool, mode_state: ModeSt
 def main() -> int:
     args = _build_arg_parser().parse_args()
     configure_platform(args.platform)
+    configure_desktop_up_action(args.desktop_up_enter)
+
+    if args.check_accessibility or args.prompt_accessibility:
+        trusted = is_process_trusted(prompt=args.prompt_accessibility)
+        result = {
+            "platform": sys.platform,
+            "trusted": trusted,
+            "prompted": bool(args.prompt_accessibility),
+        }
+        print(json.dumps(result), flush=True)
+        if trusted is None:
+            return 2
+        return 0 if trusted else 1
+
     dry_run = not args.live
     if args.dry_run:
         dry_run = True
@@ -296,6 +357,44 @@ def main() -> int:
 
     if args.live:
         _announce_live_mode()
+        if is_mac():
+            trusted = is_process_trusted()
+            external_exec = os.environ.get("TOUCHLESS_EXTERNAL_EXECUTOR", "0") == "1"
+            allow_untrusted = args.allow_untrusted_accessibility or (
+                os.environ.get("TOUCHLESS_ALLOW_UNTRUSTED_ACCESSIBILITY", "0") == "1"
+            )
+            if trusted is False and not external_exec and not allow_untrusted:
+                helper_app_path = os.environ.get("TOUCHLESS_HELPER_APP_PATH", "").strip()
+                runtime_target = helper_app_path or sys.executable
+                print(
+                    (
+                        "[error] Accessibility is not granted for the active runtime process. "
+                        "Live cursor/action injection will be blocked by macOS."
+                    ),
+                    file=sys.stderr,
+                )
+                target_label = "app" if runtime_target.endswith(".app") else "binary"
+                print(
+                    (
+                        f"[error] Add this {target_label} in System Settings > Privacy & Security > "
+                        f"Accessibility, then restart launcher:\n{runtime_target}"
+                    ),
+                    file=sys.stderr,
+                )
+                return 2
+            if trusted is False and allow_untrusted:
+                print(
+                    (
+                        "[warning] Accessibility probe reported untrusted, but proceeding "
+                        "because untrusted accessibility is allowed."
+                    ),
+                    file=sys.stderr,
+                )
+            if trusted is None:
+                print(
+                    "[warning] Unable to verify macOS Accessibility trust for runtime process.",
+                    file=sys.stderr,
+                )
 
     if args.mode == "esp":
         return _run_esp_pipeline(args, dry_run=dry_run, mode_state=mode_state)

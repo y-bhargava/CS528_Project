@@ -48,8 +48,8 @@ def load_csv_window(path: Path) -> np.ndarray | None:
 
 def extract_features(window: np.ndarray) -> np.ndarray:
     """
-    Extract the 18-feature vector used by training, prediction, and ESP export:
-    [max(ax..gz), min(ax..gz), std(ax..gz)].
+    Extract the 24-feature vector used by training, prediction, and ESP export:
+    [max(ax..gz), min(ax..gz), std(ax..gz), mean(ax..gz)].
     """
     if window.ndim != 2 or window.shape[1] != len(AXIS_COLS):
         raise ValueError(
@@ -60,7 +60,7 @@ def extract_features(window: np.ndarray) -> np.ndarray:
         window.max(axis=0),
         window.min(axis=0),
         window.std(axis=0),
-        window.mean(axis=0) 
+        window.mean(axis=0),
     ])
 
 

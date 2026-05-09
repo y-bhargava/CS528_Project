@@ -4,3 +4,10 @@ __pycache__/
 node_modules/
 launcher/node_modules/
 .DS_Store
+launcher/.build-runtime/
+launcher/dist/
+launcher/dist/**
+launcher/resources/runtime/*
+!launcher/resources/runtime/.gitkeep
+launcher/resources/firmware/*
+!launcher/resources/firmware/.gitkeep
